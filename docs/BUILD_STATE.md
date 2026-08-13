@@ -658,3 +658,45 @@ Ask AI V2 guardrails:
 - OpenRouter remains inside Langflow.
 - No ai.py Ask AI V2 integration was implemented.
 - No secrets recorded in BUILD_STATE.md.
+
+## Compatibility Audit
+
+Audit date/time:
+
+- 2026-08-14 01:06:32 +0600 +06
+
+Known working environment:
+
+- Python executable: `.venv/bin/python`
+- Python version: 3.11.15
+- Platform: macOS-26.6.1-arm64-arm-64bit
+- CPU architecture: arm64
+- Langflow export tested version: 1.11.3
+
+Direct package versions pinned for reproducibility:
+
+- streamlit==1.61.1
+- astrapy==2.3.1
+- python-dotenv==1.2.2
+- requests==2.34.2
+- pytest==9.1.1
+
+Compatibility decisions:
+
+- `requirements.txt` pins only the direct application dependencies currently used by the app.
+- `requirements-dev.txt` pins only the direct development dependency currently used for tests.
+- Transitive dependencies are intentionally not listed manually.
+- The installed Streamlit exposes `st.fragment`, but `main.py` does not depend on it.
+- The Langflow run API uses `/api/v1/run/<flow_id>` and `x-api-key`, not tutorial-era Bearer auth.
+- Astra notes use server-side vectorize with provider `nvidia`, model `nvidia/nv-embedqa-e5-v5`, dimension `1024`, metric `cosine`.
+- Python note inserts send text through `$vectorize`; Python never creates guessed `$vector` values.
+
+Validation results:
+
+- `pip check`: PASS, no broken requirements found.
+- `pytest -q`: PASS, 109 tests passed.
+- `python -m compileall -q -x '(^|/)(\\.venv|__pycache__)(/|$)' .`: PASS.
+- Non-destructive Astra smoke: PASS, accessible collections inspected: `notes`, `personal_data`.
+- Non-destructive Astra vectorize smoke: PASS, `notes` provider/model is `nvidia` / `nvidia/nv-embedqa-e5-v5`.
+- Non-destructive Macro Flow smoke: PASS, response parsed into `calories`, `protein`, `fat`, `carbs`.
+- Non-destructive Ask AI math smoke: PASS, answer contained the expected arithmetic result `108`.
