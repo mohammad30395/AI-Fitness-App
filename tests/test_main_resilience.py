@@ -27,3 +27,11 @@ def test_safe_ui_errors_are_user_friendly_without_low_level_details():
     assert "AstraCS" not in main._safe_notes_error("Loading notes", error)
     assert "AstraCS" not in main._safe_macro_error("Generating macros", error)
     assert "AstraCS" not in main._safe_ask_ai_error("Ask AI", error)
+
+
+def test_profile_validation_errors_show_actionable_field_message():
+    error = main.db.InvalidProfileError("activity_level must be a non-empty string")
+
+    message = main._safe_profile_error("Saving profile", error)
+
+    assert message == "Saving profile failed: activity_level must be a non-empty string."

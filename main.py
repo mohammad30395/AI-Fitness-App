@@ -81,6 +81,9 @@ def _goals_to_text(profile: dict) -> str:
 
 
 def _safe_profile_error(action: str, error: Exception) -> str:
+    if isinstance(error, (db.InvalidProfileError, profiles.ProfileDataError)):
+        message = _sanitize_diagnostic(str(error))
+        return f"{action} failed: {message}."
     return f"{action} failed ({type(error).__name__}). Check profile fields and database configuration."
 
 
