@@ -130,3 +130,41 @@ Environment bootstrap guardrails:
 - No Astra DB collections created.
 - No Langflow flows created.
 - No credentials invented, created, modified, read, or printed.
+
+## Configuration Handling
+
+Configuration milestone date/time:
+
+- 2026-08-13 12:26:36 +06 +0600
+
+Files added:
+
+- .env.example
+- config.py
+- scripts/check_config.py
+- tests/test_config.py
+
+Configuration decisions:
+
+- config.py calls load_dotenv() and reads values with os.getenv.
+- Base app configuration has no credential requirement yet.
+- Astra validation requires Astra endpoint, token, and collection names.
+- ASTRA_DB_KEYSPACE is optional because current AstraPy Data API usage may not require an explicit keyspace.
+- Langflow validation requires the Langflow URL, API key, flow IDs, and component IDs needed by the tutorial architecture.
+- OPENROUTER_API_KEY is included only as a future optional placeholder because the Streamlit app should call Langflow, not OpenRouter, in this architecture.
+- Validation reports missing variable names only and never prints secret values.
+
+Configuration verification:
+
+- .venv/bin/python -m pytest: 3 passed
+- .venv/bin/python scripts/check_config.py --mode base: passed
+- git check-ignore -v .env: .env is ignored by .gitignore
+
+Configuration guardrails:
+
+- No fake keys added.
+- No .env file created.
+- No external service connection attempted.
+- No Astra DB collections created.
+- No Langflow flows created.
+- No application logic created.
