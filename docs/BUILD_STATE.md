@@ -262,3 +262,63 @@ Structured profile collection guardrails:
 - No Langflow work performed.
 - Endpoint and token were not printed.
 - No secrets recorded in BUILD_STATE.md.
+
+## Notes Vectorize Collection
+
+Notes collection milestone date/time:
+
+- 2026-08-13 13:49:08 +06 +0600
+
+Files added:
+
+- scripts/setup_notes_collection.py
+- tests/test_setup_notes_collection.py
+
+AstraPy and Data API behavior used:
+
+- Installed astrapy version: 2.3.1
+- DataAPIClient imported from astrapy.
+- Database object obtained with DataAPIClient(...).get_database(...).
+- Supported embedding providers discovered with database.get_database_admin().find_embedding_providers().
+- Collection metadata inspected with database.list_collection_names() and database.list_collections().
+- ASTRA_DB_KEYSPACE is passed only when configured; it is not forced when blank.
+- Existing notes collection is reused only when metadata shows the expected vectorize provider/model.
+- Incompatible existing notes collection causes setup to stop because changing collection vector settings requires a migration or a new collection.
+
+Selected vectorize configuration:
+
+- Collection name: notes
+- Provider: nvidia
+- Model: nvidia/nv-embedqa-e5-v5
+- Metric: cosine
+- Visible provider/model dimension: 1024
+- Vector dimension was not hardcoded in the collection definition.
+
+Collection result:
+
+- First setup run: created vectorize-enabled collection
+- Second setup run: reused existing vectorize-enabled collection
+- Final descriptor inspection: provider nvidia, model nvidia/nv-embedqa-e5-v5, metric cosine
+
+Application-level note document shape:
+
+- _id
+- user_id
+- text
+- $vectorize containing the note text when required by current Data API writes
+- generated $vector managed by Astra
+
+Test result:
+
+- .venv/bin/python -m pytest: 11 passed
+
+Notes collection guardrails:
+
+- No sample notes inserted.
+- No manual $vector values inserted.
+- No inserts, updates, deletes, truncates, or drops performed.
+- Existing notes collection was never dropped, overwritten, or recreated.
+- No fallback provider/model selected.
+- Endpoint and token were not printed.
+- No secrets recorded in BUILD_STATE.md.
+- No Langflow work performed.
