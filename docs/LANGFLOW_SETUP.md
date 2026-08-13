@@ -212,7 +212,21 @@ MACRO_GOALS_COMPONENT_ID=Prompt Template-VgARU
 
 ## Ask AI V2
 
-Status: manual build guide only. Do not generate or import assistant-created Langflow JSON for this flow.
+Status: built manually in the Langflow UI and exported from Langflow.
+
+Exported file:
+
+```text
+flows/ask_ai_v2.json
+```
+
+Flow ID:
+
+```text
+b9b1438d-2ab4-461a-b86d-8f8806ddd5ad
+```
+
+The flow JSON came from Langflow export. It was not generated or fabricated in this repository.
 
 The intended flow is a routed workflow with two paths:
 
@@ -495,6 +509,166 @@ This milestone is not complete until all of these are true:
 - The real exported flow was saved as `flows/ask_ai_v2.json`.
 - No component IDs were invented.
 - `ai.py` was not modified for Ask AI V2 yet.
+
+### Export Validation
+
+Validated exported file:
+
+```text
+flows/ask_ai_v2.json
+```
+
+Export metadata:
+
+- Flow name: `Ask AI V2`
+- Flow ID: `b9b1438d-2ab4-461a-b86d-8f8806ddd5ad`
+- Endpoint name: not configured
+- Langflow export tested version: `1.11.3`
+
+Validated topology:
+
+```text
+question Chat Input
+  -> router_prompt Prompt Template
+  -> router_model OpenRouter
+  -> conditional_router Conditional Router
+
+conditional_router true
+  -> math_agent Agent
+  -> math output Chat Output
+
+calculator Toolset
+  -> math_agent tools
+
+conditional_router false
+  -> Astra DB vector search
+  -> Parser
+  -> advice_prompt Prompt Template
+  -> advice_model OpenRouter
+  -> advice_output Chat Output
+```
+
+This is one tool-calling Agent on the math path plus one normal RAG chain on the advice path. The RAG path is not a second peer agent.
+
+Real component IDs from the exported flow:
+
+- Question runtime input: `ChatInput-sk4My`
+- Router prompt: `Prompt Template-Ep1bw`
+- Router model: `ext:openrouter:OpenRouterComponent@official-lyVR9`
+- Conditional router: `ConditionalRouter-pJ6SL`
+- Math agent: `Agent-8TtHH`
+- Calculator: `CalculatorComponent-Q8RgL`
+- Math output: `ChatOutput-EUmKq`
+- Astra notes retrieval: `ext:datastax:AstraDBVectorStoreComponent@official-2VBhC`
+- Parser: `ParserComponent-Vi5va`
+- Advice prompt: `Prompt Template-GtOCM`
+- Advice model: `ext:openrouter:OpenRouterComponent@official-N7r20`
+- Advice output: `ChatOutput-Fe9Q2`
+
+Confirmed graph edges:
+
+- `ChatInput-sk4My` -> `Prompt Template-Ep1bw.question`
+- `Prompt Template-Ep1bw` -> `ext:openrouter:OpenRouterComponent@official-lyVR9.input_value`
+- `ext:openrouter:OpenRouterComponent@official-lyVR9` -> `ConditionalRouter-pJ6SL.input_text`
+- `ConditionalRouter-pJ6SL.true_result` -> `Agent-8TtHH.input_value`
+- `CalculatorComponent-Q8RgL.component_as_tool` -> `Agent-8TtHH.tools`
+- `Agent-8TtHH.response` -> `ChatOutput-EUmKq.input_value`
+- `ConditionalRouter-pJ6SL.false_result` -> `ext:datastax:AstraDBVectorStoreComponent@official-2VBhC.search_query`
+- `ext:datastax:AstraDBVectorStoreComponent@official-2VBhC.dataframe` -> `ParserComponent-Vi5va.input_data`
+- `ParserComponent-Vi5va.parsed_text` -> `Prompt Template-GtOCM.notes`
+- `ChatInput-sk4My` -> `Prompt Template-GtOCM.question`
+- `Prompt Template-GtOCM` -> `ext:openrouter:OpenRouterComponent@official-N7r20.input_value`
+- `ext:openrouter:OpenRouterComponent@official-N7r20` -> `ChatOutput-Fe9Q2.input_value`
+
+Privacy-isolation configuration:
+
+- Astra collection: `notes`
+- Content field: `text`
+- Search method: vector search
+- Search metadata filter field: `advanced_search_filter`
+- Exported default filter: `{ "user_id": "{user_id}" }`
+- Runtime tweak component: `ext:datastax:AstraDBVectorStoreComponent@official-2VBhC`
+- Runtime tweak field: `advanced_search_filter`
+
+The Python integration must replace the placeholder with the selected profile ID at runtime, for example:
+
+```python
+"tweaks": {
+    "ext:datastax:AstraDBVectorStoreComponent@official-2VBhC": {
+        "advanced_search_filter": "{\"user_id\":\"selected-profile-id\"}"
+    },
+    "Prompt Template-GtOCM": {
+        "profile": profile_context
+    }
+}
+```
+
+Do not hardcode a real user ID. Do not remove the metadata filter.
+
+### Ask AI V2 API Contract
+
+The real Share -> API Access snippet showed:
+
+```text
+API version: v1
+URL: http://127.0.0.1:7860/api/v1/run/b9b1438d-2ab4-461a-b86d-8f8806ddd5ad
+Auth header: x-api-key
+input_type: chat
+output_type: chat
+```
+
+Expected request shape:
+
+```python
+payload = {
+    "output_type": "chat",
+    "input_type": "chat",
+    "input_value": question,
+    "tweaks": {
+        "ext:datastax:AstraDBVectorStoreComponent@official-2VBhC": {
+            "advanced_search_filter": "{\"user_id\":\"selected-profile-id\"}"
+        },
+        "Prompt Template-GtOCM": {
+            "profile": profile_context
+        },
+    },
+}
+headers = {"x-api-key": langflow_api_key}
+```
+
+Live API response extraction path observed with a synthetic math request:
+
+```text
+outputs[0].outputs[0].results.message.data.text
+```
+
+The response can also include tool-call content blocks for the calculator path. The Python extractor should validate the nested shape and raise a clear error if this current structure changes.
+
+### Ask AI V2 Verification
+
+Manual Playground verification completed:
+
+- Math route: passed. A calorie arithmetic question routed to the real Agent with Calculator tool and returned the correct result.
+- Advice route: passed structurally. A fitness advice question routed to the RAG advice chain and returned a general safety-aware answer.
+
+Repository validation completed:
+
+- `flows/ask_ai_v2.json` exists and is non-empty.
+- The exported graph contains one Agent and one Calculator on the math path.
+- The exported graph contains one Astra DB vector search, Parser, advice Prompt Template, OpenRouter model, and advice Chat Output on the non-math path.
+- The exported graph contains a `conditional_router.false_result` edge into the Astra DB search query.
+- The Astra DB search metadata filter includes `user_id`.
+- Required runtime fields are exposed through API/tweaks.
+- Export inspection found no obvious OpenRouter API key or Astra token strings.
+
+Runtime privacy-isolation proof:
+
+- Full User A/User B privacy-isolation test passed on 2026-08-13.
+- The test inserted two synthetic notes through `db.add_note`, one for `privacy-test-user-a` and one for `privacy-test-user-b`.
+- User A retrieved only the User A synthetic phrase and did not retrieve User B's phrase.
+- User B retrieved only the User B synthetic phrase and did not retrieve User A's phrase.
+- A nonexistent synthetic user retrieved neither private test phrase.
+- The test deleted the inserted synthetic notes after verification.
 
 References checked:
 

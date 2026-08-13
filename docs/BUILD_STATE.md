@@ -590,3 +590,71 @@ Manual integration script guardrails:
 - No Astra DB write attempted.
 - No Streamlit UI built.
 - No secrets recorded in BUILD_STATE.md.
+
+## Ask AI V2 Langflow Export
+
+Ask AI V2 export validation date/time:
+
+- 2026-08-13 22:13:00 +06 +0600
+
+Files added:
+
+- flows/ask_ai_v2.json
+
+Files updated:
+
+- docs/LANGFLOW_SETUP.md
+- docs/BUILD_STATE.md
+
+Langflow runtime:
+
+- Langflow URL used during validation: http://127.0.0.1:7860
+- Flow name: Ask AI V2
+- Flow ID: b9b1438d-2ab4-461a-b86d-8f8806ddd5ad
+
+Runtime contract observed:
+
+- API version: v1
+- Endpoint path: /api/v1/run/b9b1438d-2ab4-461a-b86d-8f8806ddd5ad
+- Auth header name: x-api-key
+- input_type: chat
+- output_type: chat
+- Response text path observed: outputs[0].outputs[0].results.message.data.text
+
+Real exported runtime component IDs:
+
+- Question input: ChatInput-sk4My
+- Profile context tweak: Prompt Template-GtOCM.profile
+- User ID filter tweak: ext:datastax:AstraDBVectorStoreComponent@official-2VBhC.advanced_search_filter
+
+Topology validation:
+
+- Router prompt, OpenRouter router model, and Conditional Router are present.
+- Math path contains one Agent and one Calculator tool.
+- Advice path contains Astra DB vector search, Parser, advice Prompt Template, OpenRouter model, and advice Chat Output.
+- This is one tool-calling Agent plus one normal RAG chain, not multiple peer agents.
+
+Privacy configuration:
+
+- Astra collection: notes
+- Content field: text
+- Search metadata filter includes user_id.
+- Runtime filter value must be supplied from the selected profile ID; no real user ID is hardcoded.
+
+Verification:
+
+- Live synthetic math API call: passed.
+- Export secret scan: no obvious OpenRouter API key or Astra token strings found.
+- Full User A/User B retrieval isolation proof: passed on 2026-08-13.
+- Synthetic User A retrieved only the User A test note.
+- Synthetic User B retrieved only the User B test note.
+- A nonexistent synthetic user retrieved neither private test note.
+- The test inserted two synthetic notes through db.add_note and deleted those same notes after verification.
+
+Ask AI V2 guardrails:
+
+- Flow JSON came from Langflow export.
+- No assistant-generated flow JSON was created.
+- OpenRouter remains inside Langflow.
+- No ai.py Ask AI V2 integration was implemented.
+- No secrets recorded in BUILD_STATE.md.
