@@ -22,6 +22,22 @@ def patch_macro_config(monkeypatch, *, flow_id="macro-flow", goals_component_id=
     return values
 
 
+def patch_ask_ai_config(
+    monkeypatch,
+    *,
+    flow_id="ask-flow",
+    profile_component_id="Prompt Template-GtOCM",
+    user_id_component_id="ext:datastax:AstraDBVectorStoreComponent@official-2VBhC",
+):
+    values = {
+        "ASK_AI_FLOW_ID": flow_id,
+        "ASK_PROFILE_COMPONENT_ID": profile_component_id,
+        "ASK_USER_ID_COMPONENT_ID": user_id_component_id,
+    }
+    monkeypatch.setattr(ai.config, "get_env_value", lambda name: values.get(name, ""))
+    return values
+
+
 def langflow_success_response(text='{"calories": 2200, "protein": 150, "fat": 70, "carbs": 250}'):
     return {
         "session_id": "session-1",
@@ -227,3 +243,94 @@ def test_get_macros_rejects_missing_macro_configuration(monkeypatch, values):
 
     with pytest.raises(ai.LangflowConfigError):
         ai.get_macros("profile context", "build strength")
+
+
+def test_ask_ai_uses_configured_flow_and_runtime_tweaks(monkeypatch):
+    patch_ask_ai_config(monkeypatch)
+    calls = []
+
+    def fake_run_flow(flow_id, input_value, **kwargs):
+        calls.append((flow_id, input_value, kwargs))
+        return "Use your notes to structure next week around recovery and strength."
+
+    monkeypatch.setattr(ai, "run_flow", fake_run_flow)
+
+    result = ai.ask_ai(
+        " Based on my notes, what should I do next week? ",
+        "Profile id: profile-1\nActivity level: moderate",
+        "profile-1",
+        session_id="session-ask",
+    )
+
+    assert result == "Use your notes to structure next week around recovery and strength."
+    assert calls == [
+        (
+            "ask-flow",
+            "Based on my notes, what should I do next week?",
+            {
+                "input_type": "chat",
+                "output_type": "chat",
+                "session_id": "session-ask",
+                "tweaks": {
+                    "Prompt Template-GtOCM": {
+                        "profile": "Profile id: profile-1\nActivity level: moderate",
+                    },
+                    "ext:datastax:AstraDBVectorStoreComponent@official-2VBhC": {
+                        "advanced_search_filter": '{"user_id": "profile-1"}',
+                    },
+                },
+            },
+        )
+    ]
+
+
+@pytest.mark.parametrize("question", ["", "   ", None])
+def test_ask_ai_rejects_blank_questions(monkeypatch, question):
+    patch_ask_ai_config(monkeypatch)
+
+    with pytest.raises(ValueError, match="question"):
+        ai.ask_ai(question, "profile context", "profile-1")
+
+
+@pytest.mark.parametrize(
+    "values",
+    [
+        {
+            "ASK_AI_FLOW_ID": "",
+            "ASK_PROFILE_COMPONENT_ID": "Prompt Template-GtOCM",
+            "ASK_USER_ID_COMPONENT_ID": "ext:datastax:AstraDBVectorStoreComponent@official-2VBhC",
+        },
+        {
+            "ASK_AI_FLOW_ID": "ask-flow",
+            "ASK_PROFILE_COMPONENT_ID": "",
+            "ASK_USER_ID_COMPONENT_ID": "ext:datastax:AstraDBVectorStoreComponent@official-2VBhC",
+        },
+        {
+            "ASK_AI_FLOW_ID": "ask-flow",
+            "ASK_PROFILE_COMPONENT_ID": "Prompt Template-GtOCM",
+            "ASK_USER_ID_COMPONENT_ID": "",
+        },
+    ],
+)
+def test_ask_ai_rejects_missing_configuration(monkeypatch, values):
+    monkeypatch.setattr(ai.config, "get_env_value", lambda name: values.get(name, ""))
+
+    with pytest.raises(ai.LangflowConfigError) as exc_info:
+        ai.ask_ai("What should I do next week?", "profile context", "profile-1")
+
+    assert "Missing required environment variable" in str(exc_info.value)
+
+
+def test_ask_ai_propagates_langflow_errors_without_secrets(monkeypatch):
+    patch_ask_ai_config(monkeypatch)
+
+    def fake_run_flow(flow_id, input_value, **kwargs):
+        raise ai.LangflowResponseError("Expected response shape; top-level keys: ['outputs']")
+
+    monkeypatch.setattr(ai, "run_flow", fake_run_flow)
+
+    with pytest.raises(ai.LangflowResponseError) as exc_info:
+        ai.ask_ai("What should I do next week?", "profile context", "profile-1")
+
+    assert "top-level keys" in str(exc_info.value)
+    assert "secret" not in str(exc_info.value).lower()

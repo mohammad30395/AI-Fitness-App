@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping
 from typing import Any
 
@@ -177,3 +178,34 @@ def get_macros(profile_context: str, goals: str) -> dict[str, int | float]:
         },
     )
     return parse_nutrition_json(text)
+
+
+def ask_ai(
+    question: str,
+    profile_context: str,
+    user_id: str,
+    session_id: str | None = None,
+) -> str:
+    """Run Ask AI V2 through Langflow and return the final plain-text answer."""
+    if not isinstance(question, str) or not question.strip():
+        raise ValueError("question must be a non-empty string.")
+
+    flow_id = _require_config_value("ASK_AI_FLOW_ID")
+    profile_component_id = _require_config_value("ASK_PROFILE_COMPONENT_ID")
+    user_id_component_id = _require_config_value("ASK_USER_ID_COMPONENT_ID")
+
+    return run_flow(
+        flow_id,
+        question.strip(),
+        input_type=DEFAULT_INPUT_TYPE,
+        output_type=DEFAULT_OUTPUT_TYPE,
+        session_id=session_id,
+        tweaks={
+            profile_component_id: {
+                "profile": profile_context,
+            },
+            user_id_component_id: {
+                "advanced_search_filter": json.dumps({"user_id": user_id}),
+            },
+        },
+    )
