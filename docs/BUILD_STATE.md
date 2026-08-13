@@ -544,3 +544,49 @@ Macro Flow guardrails:
 - ai.py and get_macros() were not implemented.
 - Ask AI V2 was not created.
 - No real secret was recorded in docs or exported flow.
+
+## Macro Flow Manual Integration Script
+
+Manual integration script milestone date/time:
+
+- 2026-08-13 17:56:38 +06 +0600
+
+Files added:
+
+- scripts/test_macro_flow.py
+
+Script behavior:
+
+- Builds synthetic profile context through profiles.build_profile_context().
+- Calls ai.get_macros().
+- Prints a sanitized input summary, parsed nutrition dictionary, and request duration.
+- Does not print API keys, tokens, raw headers, or full endpoint secrets.
+- Does not save anything to Astra DB.
+- Exits nonzero for Langflow call failure, parser failure, or missing nutrition fields.
+- If parsing fails, performs one raw diagnostic Macro Flow call and prints a sanitized output preview, instructing the user to fix the Langflow prompt rather than weakening the parser.
+
+Verification:
+
+- .venv/bin/python -m pytest: 69 passed
+- .venv/bin/python scripts/test_macro_flow.py: failed before reaching Langflow response parsing because Langflow was not reachable at 127.0.0.1:7860.
+- 2026-08-13 18:00:22 +06 +0600 rerun: Langflow was reachable, but the request failed with HTTP 403 Forbidden.
+- 2026-08-13 18:04:46 +06 +0600 rerun: passed with synthetic profile data; parsed nutrition dictionary contained calories, protein, fat, and carbs.
+
+Sanitized failure:
+
+- Error type: ConnectionError
+- Reason: connection refused to local Langflow server at 127.0.0.1:7860
+- Rerun error type: HTTPError
+- Rerun reason: 403 Forbidden from local Langflow API; required Langflow environment variables were present but the API key was not accepted for this request.
+
+Sanitized success:
+
+- Parsed nutrition dict shape: calories, protein, fat, carbs
+- Request duration: 2.94s
+
+Manual integration script guardrails:
+
+- Synthetic input only.
+- No Astra DB write attempted.
+- No Streamlit UI built.
+- No secrets recorded in BUILD_STATE.md.

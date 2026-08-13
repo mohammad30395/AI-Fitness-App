@@ -209,3 +209,299 @@ MACRO_GOALS_COMPONENT_ID=Prompt Template-VgARU
 - `Save with my API keys` was left unchecked during export.
 - Export inspection found no obvious OpenRouter or Astra secret strings.
 - `ai.py`, `get_macros()`, Ask AI V2, and Streamlit UI were not implemented in this milestone.
+
+## Ask AI V2
+
+Status: manual build guide only. Do not generate or import assistant-created Langflow JSON for this flow.
+
+The intended flow is a routed workflow with two paths:
+
+```text
+Question Input
+    |
+    v
+Router Prompt -> OpenRouter model -> Conditional Router
+    | math / yes                 | non-math / no
+    v                            v
+Agent with Calculator            Astra DB vector search
+    |                            filtered by user_id
+Calculator Tool                  |
+    |                            v
+    v                            Parser / text context
+Math Output                      |
+                                 v
+                         Advice Prompt Template
+                         inputs: question, profile, notes
+                                 |
+                                 v
+                         OpenRouter model
+                                 |
+                                 v
+                         Advice Output
+```
+
+### Component Roles
+
+Use the component names visible in the current Langflow editor. In this Langflow version, the likely current names are:
+
+- Question input: `Chat Input`
+- Router prompt: `Prompt Template`
+- Router model: `OpenRouter`
+- Conditional router: `If-Else` if you are routing on the literal output `yes`; use `Smart Router` only if your UI makes that the supported routing component for model categories.
+- Math path: `Agent` with a real `Calculator` tool connected to the Agent tools input.
+- RAG path: `Astra DB` from the DataStax bundle for vector search against the existing `notes` collection.
+- Notes-to-text transformation: `Parser` or the current parsing component that extracts note text into context.
+- Advice prompt: `Prompt Template`
+- Advice model: `OpenRouter`
+- Output: `Chat Output` or `Text Output`, whichever works in your Playground/API Access for this flow.
+
+Do not call the RAG path an autonomous agent. It is a normal retrieval-and-generation chain.
+
+### Runtime Inputs
+
+The later Python app needs to provide these runtime values:
+
+- `question`: the user's question, preferably through the normal chat/API `input_value`.
+- `profile`: profile context from `profiles.build_profile_context(...)`, exposed through a Prompt Template field or equivalent runtime tweak.
+- `user_id`: selected profile ID, used in the Astra DB vector search filter so notes never mix between profiles.
+
+Use existing placeholder variables in `.env.example` after the real flow is exported:
+
+```env
+ASK_AI_FLOW_ID=
+ASK_PROFILE_COMPONENT_ID=
+ASK_USER_ID_COMPONENT_ID=
+```
+
+Do not fill these with guessed values. Copy actual IDs only from Share -> API Access or the real exported Langflow JSON after you manually build and export the flow.
+
+### Router Path
+
+Add the question input, router Prompt Template, OpenRouter model, and conditional router.
+
+Router Prompt Template:
+
+```text
+Classify whether the user's question requires calculator/tool reasoning.
+
+Return only one lowercase word:
+yes
+no
+
+Return yes only when arithmetic, unit conversion, macro totals, calorie math, BMI-style arithmetic, date arithmetic, or another explicit calculation is required.
+
+Return no for general fitness, nutrition, profile, habit, or note-based advice that does not require calculation.
+
+Question:
+{question}
+```
+
+Router model settings:
+
+- Provider: `OpenRouter`
+- Model: choose a currently available OpenRouter chat model from the real model list.
+- Temperature: `0`
+- System message, if available:
+
+```text
+Return only yes or no.
+```
+
+Conditional router configuration:
+
+- If using `If-Else`, compare the router model output to `yes`.
+- True/yes path goes to the math Agent.
+- False/no path goes to Astra DB vector search.
+- Do not route on vague prose. If the router emits anything except `yes` or `no`, fix the router prompt/model settings before wiring Python.
+
+### Math Path
+
+Add one real `Agent` component and one real `Calculator` tool.
+
+Configuration:
+
+- Use the current Langflow `Agent` component. The current Agent component supports tool calling when tools are connected.
+- Add the `Calculator` component.
+- Connect the Calculator tool output to the Agent tools input.
+- Do not fake calculator behavior with a prompt-only model.
+- Do not add extra tools for this milestone.
+
+Math Agent instruction:
+
+```text
+You answer only calculation-based fitness questions.
+Use the calculator tool for arithmetic.
+Return a concise answer with the calculation result and a short plain-language explanation.
+Do not provide medical diagnosis.
+```
+
+Connect the math path to `Math Output`.
+
+### RAG Advice Path
+
+Add an Astra DB vector search component from the DataStax bundle.
+
+Use the existing Astra DB setup:
+
+- Collection: `notes`
+- Raw readable note field: `text`
+- Server-side vectorize collection: the collection was created with Astra-managed `$vectorize`/`$vector`.
+- Search query: user question text.
+- Filter: selected profile/user ID only.
+
+The exact Astra DB component fields vary by Langflow/DataStax bundle version. Inspect the component parameters instead of guessing. Configure the user filter semantically as:
+
+```json
+{ "user_id": "<runtime selected profile id>" }
+```
+
+Expose the actual field carrying that filter or user ID through Parameters/API so the Python app can pass the selected profile ID at runtime.
+
+Do not:
+
+- Create a new Astra collection.
+- Insert sample notes.
+- Guess vector dimensions.
+- Add manual `$vector` values.
+- Remove the user_id filter.
+
+After Astra search, add a parsing component to extract readable note text. Use the current `Parser` or equivalent component to turn retrieved documents into concise text context for the advice prompt.
+
+### Advice Prompt
+
+Add a Prompt Template for the non-math advice path.
+
+Template:
+
+```text
+You are a personal fitness assistant providing general fitness and nutrition guidance.
+
+Use the profile context, retrieved notes, and user question below.
+
+Safety:
+- Provide general fitness information only.
+- Do not claim medical precision.
+- Do not diagnose injuries or medical conditions.
+- Do not treat or prescribe.
+- Recommend professional medical evaluation for significant pain, injury, alarming symptoms, eating disorder concerns, pregnancy-specific medical questions, medication interactions, or other urgent/clinical issues.
+
+Profile context:
+{profile}
+
+Retrieved note context:
+{notes}
+
+User question:
+{question}
+
+Answer clearly and practically. If the retrieved notes are empty or unrelated, say that you do not have relevant notes and answer from the profile and general guidance only.
+```
+
+Inputs required by this prompt:
+
+- `question`
+- `profile`
+- `notes`
+
+Connect:
+
+- Question input -> Advice Prompt `question`
+- Profile runtime value -> Advice Prompt `profile`
+- Parsed Astra note context -> Advice Prompt `notes`
+- Advice Prompt -> OpenRouter model -> Advice Output
+
+Advice model settings:
+
+- Provider: `OpenRouter`
+- Model: choose only from the models actually available in the current Langflow/OpenRouter model list.
+- Temperature: `0` to `0.3`
+- Keep OpenRouter credentials in Langflow/global variables, not source code.
+
+### Manual Test Checklist
+
+Use synthetic test data only.
+
+Math test:
+
+```text
+If my calorie target is 2400 and I ate 650 breakfast plus 780 lunch, how many calories remain?
+```
+
+Expected route:
+
+- Router returns `yes`.
+- Agent uses Calculator.
+- Output answers the arithmetic question.
+
+Advice/RAG test:
+
+```text
+Based on my profile and notes, how should I structure my next workout week?
+```
+
+Expected route:
+
+- Router returns `no`.
+- Astra DB vector search runs with a `user_id` filter.
+- Advice prompt receives question, profile, and retrieved note context.
+- Output gives general advice with safety-aware wording.
+
+Use a known safe test note that already exists for the selected synthetic/test profile, or create one through the application's explicit note smoke-test tooling before testing. Do not insert production sample notes from Langflow during this milestone.
+
+Isolation test:
+
+- Run the advice path with a different synthetic/test profile ID.
+- Confirm the first profile's known test note is not retrieved for the second profile.
+- If notes appear across profiles, stop and fix the Astra DB filter before exporting the flow.
+
+### API Access And Export
+
+After the flow works in Playground:
+
+1. Expose only the runtime/API fields needed by the Python app:
+   - profile context
+   - selected user/profile ID for the Astra filter
+   - any required question field if it is not supplied through the normal API `input_value`
+2. Open Share -> API Access.
+3. Capture the actual generated contract:
+   - flow ID or endpoint
+   - auth header
+   - input/output types
+   - response shape
+   - actual tweak component IDs and field names
+4. Do not assume Bearer auth if the generated snippet uses `x-api-key`.
+5. Save the actual generated API snippet in a safe local reference only after redacting any real API key.
+6. Export the completed real flow from Langflow.
+7. Save it as `flows/ask_ai_v2.json` only after it comes from Langflow's real export function.
+8. Keep `Save with my API keys` unchecked.
+9. Stop and wait for confirmation before implementing Python integration.
+
+Do not implement Python integration for Ask AI V2 until the real API contract and exported flow are inspected.
+
+### Completion Gate
+
+This milestone is not complete until all of these are true:
+
+- The flow was manually built in the current Langflow visual editor.
+- No assistant-generated Langflow JSON was imported.
+- The router returns deterministic `yes` or `no`.
+- A pure arithmetic question routes to the Calculator Agent path.
+- A fitness advice question routes to the Astra RAG path and retrieves a known note for the selected test profile.
+- A question from a different profile does not retrieve the first profile's note.
+- Only models actually available in the current Langflow/OpenRouter installation were selected.
+- Share/API Access was inspected.
+- Only required runtime fields were exposed.
+- The actual generated API snippet was saved safely with secrets redacted.
+- The real exported flow was saved as `flows/ask_ai_v2.json`.
+- No component IDs were invented.
+- `ai.py` was not modified for Ask AI V2 yet.
+
+References checked:
+
+- Langflow components overview: https://docs.langflow.org/concepts-components
+- Agent and tool calling: https://docs.langflow.org/agents and https://docs.langflow.org/agents-tools
+- If-Else conditional router: https://docs.langflow.org/if-else
+- Smart Router: https://docs.langflow.org/smart-router
+- DataStax/Astra DB bundle: https://docs.langflow.org/bundles-datastax
+- Vector RAG and Parser role: https://docs.langflow.org/knowledge
+- API key auth: https://docs.langflow.org/api-keys-and-authentication
