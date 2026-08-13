@@ -15,3 +15,11 @@
 - Change one suggested value manually, then click Save / Apply nutrition.
 - Refresh the browser, reselect the same profile, and confirm the saved nutrition values persist.
 - Confirm an AI/API/parser failure shows an on-page error without crashing the app.
+
+## Notes UI
+
+- Select or create profile A and add a unique synthetic note.
+- Select or create profile B and confirm profile A's unique note is not visible.
+- Add a different unique synthetic note to profile B.
+- Switch back to profile A and confirm profile A's note is still visible.
+- Delete profile A's note using the confirmation step and confirm profile B's notes are unchanged.

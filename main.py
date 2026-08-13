@@ -1,6 +1,7 @@
 import streamlit as st
 
 import ai
+import db
 import profiles
 
 
@@ -17,6 +18,11 @@ SESSION_DEFAULTS = {
     "profile_success": None,
     "macro_success": None,
     "macro_error": None,
+    "notes": [],
+    "notes_profile_id": None,
+    "notes_success": None,
+    "notes_error": None,
+    "confirm_delete_note_id": None,
 }
 
 
@@ -54,6 +60,10 @@ def _safe_macro_error(action: str, error: Exception) -> str:
     return f"{action} failed ({type(error).__name__}). Check Langflow configuration and macro output."
 
 
+def _safe_notes_error(action: str, error: Exception) -> str:
+    return f"{action} failed ({type(error).__name__}). Check note text and Astra notes configuration."
+
+
 def _profile_label(profile_id) -> str:
     for profile in st.session_state.get("profiles", []):
         if str(profile.get("_id")) == str(profile_id):
@@ -73,6 +83,9 @@ def _set_selected_profile(profile: dict | None) -> None:
     stored_nutrition = _copy_nutrition(profile.get("nutrition")) if profile else None
     st.session_state["nutrition"] = stored_nutrition
     _set_nutrition_draft(profile.get("_id") if profile else None, stored_nutrition)
+    st.session_state["notes"] = []
+    st.session_state["notes_profile_id"] = None
+    st.session_state["confirm_delete_note_id"] = None
 
 
 def _set_nutrition_draft(profile_id, nutrition) -> None:
@@ -105,6 +118,19 @@ def _refresh_profiles(select_profile_id=None) -> bool:
         st.session_state["ui_error"] = _safe_profile_error("Loading profiles", error)
         st.session_state["profiles"] = []
         _set_selected_profile(None)
+        return False
+
+
+def _refresh_notes(user_id: str) -> bool:
+    try:
+        st.session_state["notes"] = db.list_notes(user_id, limit=50)
+        st.session_state["notes_profile_id"] = user_id
+        st.session_state["notes_error"] = None
+        return True
+    except Exception as error:
+        st.session_state["notes"] = []
+        st.session_state["notes_profile_id"] = None
+        st.session_state["notes_error"] = _safe_notes_error("Loading notes", error)
         return False
 
 
@@ -370,7 +396,90 @@ def render_nutrition_section() -> None:
 def render_notes_section() -> None:
     st.header("Notes")
     with st.container(border=True):
-        st.write("Profile-specific notes will appear here after note storage is wired.")
+        selected_profile = st.session_state.get("selected_profile")
+        if not selected_profile:
+            st.info("Select or create a profile before adding notes.")
+            return
+
+        user_id = str(selected_profile.get("_id") or "").strip()
+        if not user_id:
+            st.error("Selected profile is missing an ID.")
+            return
+
+        st.caption("Notes are saved only for the selected profile.")
+
+        if str(st.session_state.get("notes_profile_id")) != user_id:
+            _refresh_notes(user_id)
+
+        if st.session_state.get("notes_success"):
+            st.success(st.session_state["notes_success"])
+        if st.session_state.get("notes_error"):
+            st.error(st.session_state["notes_error"])
+
+        with st.form("add_note_form"):
+            note_text = st.text_area(
+                "Workout / fitness note",
+                placeholder="Example: Felt strong during squats today.",
+                height=120,
+            )
+            submitted = st.form_submit_button("Add Note")
+
+        if submitted:
+            try:
+                db.add_note(user_id, note_text)
+                _refresh_notes(user_id)
+                st.session_state["notes_success"] = "Note added."
+                st.session_state["notes_error"] = None
+                st.rerun()
+            except Exception as error:
+                st.session_state["notes_success"] = None
+                st.session_state["notes_error"] = _safe_notes_error("Adding note", error)
+                st.rerun()
+
+        if st.button("Refresh notes"):
+            _refresh_notes(user_id)
+            st.rerun()
+
+        notes = st.session_state.get("notes") or []
+        if not notes:
+            st.write("No notes saved for this profile yet.")
+            return
+
+        st.subheader("Saved notes")
+        for index, note in enumerate(notes, start=1):
+            note_id = note.get("_id")
+            note_key = str(note_id)
+            note_text = str(note.get("text") or "")
+
+            with st.container(border=True):
+                st.markdown(note_text)
+
+                if st.session_state.get("confirm_delete_note_id") == note_key:
+                    st.warning("Confirm deletion for this note.")
+                    confirm_col, cancel_col = st.columns(2)
+                    with confirm_col:
+                        if st.button("Confirm delete", key=f"confirm_delete_note_{note_key}"):
+                            try:
+                                db.delete_note(user_id, note_id)
+                                st.session_state["confirm_delete_note_id"] = None
+                                _refresh_notes(user_id)
+                                st.session_state["notes_success"] = "Note deleted."
+                                st.session_state["notes_error"] = None
+                                st.rerun()
+                            except Exception as error:
+                                st.session_state["notes_success"] = None
+                                st.session_state["notes_error"] = _safe_notes_error(
+                                    "Deleting note",
+                                    error,
+                                )
+                                st.rerun()
+                    with cancel_col:
+                        if st.button("Cancel", key=f"cancel_delete_note_{note_key}"):
+                            st.session_state["confirm_delete_note_id"] = None
+                            st.rerun()
+                elif st.button("Delete note", key=f"delete_note_{index}_{note_key}"):
+                    st.session_state["confirm_delete_note_id"] = note_key
+                    st.rerun()
 
 
 def render_ask_ai_section() -> None:
