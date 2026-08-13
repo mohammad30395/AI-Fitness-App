@@ -6,6 +6,7 @@ from typing import Any
 import requests
 
 import config
+from utils import parse_nutrition_json
 
 
 DEFAULT_INPUT_TYPE = "chat"
@@ -157,3 +158,22 @@ def run_flow(
         raise LangflowResponseError("Langflow returned a non-JSON response.") from exc
 
     return extract_langflow_message_text(data)
+
+
+def get_macros(profile_context: str, goals: str) -> dict[str, int | float]:
+    """Run the configured Macro Flow and return normalized nutrition targets."""
+    flow_id = _require_config_value("MACRO_FLOW_ID")
+    goals_component_id = _require_config_value("MACRO_GOALS_COMPONENT_ID")
+
+    text = run_flow(
+        flow_id,
+        profile_context,
+        input_type=DEFAULT_INPUT_TYPE,
+        output_type=DEFAULT_OUTPUT_TYPE,
+        tweaks={
+            goals_component_id: {
+                "goals": goals,
+            }
+        },
+    )
+    return parse_nutrition_json(text)

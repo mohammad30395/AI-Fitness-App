@@ -13,6 +13,15 @@ def patch_langflow_config(monkeypatch):
     return values
 
 
+def patch_macro_config(monkeypatch, *, flow_id="macro-flow", goals_component_id="Prompt Template-VgARU"):
+    values = {
+        "MACRO_FLOW_ID": flow_id,
+        "MACRO_GOALS_COMPONENT_ID": goals_component_id,
+    }
+    monkeypatch.setattr(ai.config, "get_env_value", lambda name: values.get(name, ""))
+    return values
+
+
 def langflow_success_response(text='{"calories": 2200, "protein": 150, "fat": 70, "carbs": 250}'):
     return {
         "session_id": "session-1",
@@ -169,3 +178,52 @@ def test_run_flow_rejects_missing_config_without_secret(monkeypatch):
         ai.run_flow("flow-123", "profile context")
 
     assert "LANGFLOW_URL" in str(exc_info.value)
+
+
+def test_get_macros_uses_configured_macro_flow_and_goals_component(monkeypatch):
+    patch_macro_config(monkeypatch)
+    calls = []
+
+    def fake_run_flow(flow_id, input_value, **kwargs):
+        calls.append((flow_id, input_value, kwargs))
+        return '{"calories": 2200, "protein": 150, "fat": 70, "carbs": 250}'
+
+    monkeypatch.setattr(ai, "run_flow", fake_run_flow)
+
+    result = ai.get_macros("profile context", "build strength")
+
+    assert result == {
+        "calories": 2200,
+        "protein": 150,
+        "fat": 70,
+        "carbs": 250,
+    }
+    assert calls == [
+        (
+            "macro-flow",
+            "profile context",
+            {
+                "input_type": "chat",
+                "output_type": "chat",
+                "tweaks": {
+                    "Prompt Template-VgARU": {
+                        "goals": "build strength",
+                    }
+                },
+            },
+        )
+    ]
+
+
+@pytest.mark.parametrize(
+    "values",
+    [
+        {"MACRO_FLOW_ID": "", "MACRO_GOALS_COMPONENT_ID": "Prompt Template-VgARU"},
+        {"MACRO_FLOW_ID": "macro-flow", "MACRO_GOALS_COMPONENT_ID": ""},
+    ],
+)
+def test_get_macros_rejects_missing_macro_configuration(monkeypatch, values):
+    monkeypatch.setattr(ai.config, "get_env_value", lambda name: values.get(name, ""))
+
+    with pytest.raises(ai.LangflowConfigError):
+        ai.get_macros("profile context", "build strength")
