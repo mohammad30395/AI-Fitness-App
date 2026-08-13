@@ -421,3 +421,64 @@ Note operations guardrails:
 - No notes outside the explicitly supplied user_id can be deleted or updated through db.py helpers.
 - No tokens or full database endpoint values printed.
 - No secrets recorded in BUILD_STATE.md.
+
+## Profile Domain Service Layer
+
+Profile service layer milestone date/time:
+
+- 2026-08-13 14:08:33 +06 +0600
+
+Files added:
+
+- profiles.py
+- utils.py
+- tests/test_profiles.py
+
+Public profiles.py API:
+
+- normalize_profile(profile)
+- get_all_profiles()
+- get_profile_by_id(profile_id)
+- create_new_profile(...)
+- save_profile_changes(profile_id, ...)
+- build_profile_context(profile)
+
+Implementation notes:
+
+- profiles.py is a small domain/service layer over db.py.
+- Profile documents are normalized into predictable dictionaries with stable field order.
+- goals remain a list in storage.
+- nutrition remains optional until macro generation.
+- build_profile_context produces deterministic, human-readable text for Langflow prompt injection.
+- The tutorial's exact dict_to_string helper was not present in this repository, so utils.py implements a local deterministic serializer as a project implementation choice, not copied tutorial code.
+- No authentication system was created.
+- No Streamlit UI was created.
+
+Sanitized generated context example:
+
+```text
+Profile id: example-profile-id
+Name: Example User
+Age: 30
+Weight: 70.5
+Height: 175
+Gender: unspecified
+Activity level: moderate
+Goals: build strength, improve endurance
+Nutrition:
+  Calories: 2200
+  Protein: 150
+  Fat: 70
+  Carbs: 240
+```
+
+Test result:
+
+- .venv/bin/python -m pytest: 50 passed
+
+Profile service guardrails:
+
+- Unit tests use mocks and do not hit production Astra DB.
+- No live profile data inserted, updated, deleted, or queried.
+- No tokens or full database endpoint values printed.
+- No secrets recorded in BUILD_STATE.md.
