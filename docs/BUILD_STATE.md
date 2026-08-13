@@ -2,9 +2,9 @@
 
 ## Milestone
 
-Current milestone: repository and machine audit only.
+Current milestone: COMPLETE - final local-use preparation passed.
 
-Next milestone: environment bootstrap.
+Next milestone: local use, optional deployment planning, or future feature work by explicit approval.
 
 ## Audit Date/Time
 
@@ -700,3 +700,36 @@ Validation results:
 - Non-destructive Astra vectorize smoke: PASS, `notes` provider/model is `nvidia` / `nvidia/nv-embedqa-e5-v5`.
 - Non-destructive Macro Flow smoke: PASS, response parsed into `calories`, `protein`, `fat`, `carbs`.
 - Non-destructive Ask AI math smoke: PASS, answer contained the expected arithmetic result `108`.
+
+## Final Local Use Preparation
+
+Date/time:
+
+- 2026-08-14 01:18:31 +0600 +06
+
+Status:
+
+- COMPLETE
+
+Files updated:
+
+- README.md
+- docs/BUILD_STATE.md
+
+Verification commands:
+
+- `.venv/bin/python -m pip check`: PASS, no broken requirements found.
+- `.venv/bin/python scripts/check_config.py --mode all`: PASS, required environment variable names are set; values redacted.
+- `.venv/bin/python -m pytest -q`: PASS, 109 tests passed.
+- `.venv/bin/python -m compileall -q -x '(^|/)(\\.venv|__pycache__)(/|$)' .`: PASS.
+- `.venv/bin/python scripts/check_astra.py`: PASS, read-only connectivity check inspected `notes` and `personal_data`.
+- `.venv/bin/python scripts/test_macro_flow.py`: PASS, parsed nutrition dict with `calories`, `protein`, `fat`, `carbs`.
+- `.venv/bin/python scripts/live_acceptance.py`: PASS for Astra, Macro Flow, Ask AI math, Ask AI RAG, cross-profile isolation, and cleanup.
+- `.venv/bin/python -m streamlit run main.py --server.headless true --server.port 8502`: PASS, app started without immediate exception; verification server stopped.
+
+Known limitations:
+
+- This app provides profile separation, not real multi-user authentication.
+- Fitness output is general guidance, not medical diagnosis or clinical nutrition advice.
+- Public deployment requires a reachable hosted Langflow service; a local `127.0.0.1` Langflow URL is only valid for local development.
+- OpenRouter remains inside Langflow; Streamlit does not call OpenRouter directly.
