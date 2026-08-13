@@ -151,6 +151,43 @@ headers = {"x-api-key": langflow_api_key}
 
 Response extraction must be confirmed against the live API response during the integration milestone. Do not assume an old tutorial response parser without testing this Langflow version.
 
+### Export Validation
+
+Validated exported file:
+
+```text
+flows/macro_flow.json
+```
+
+Export metadata:
+
+- Flow ID: `d0c80780-b504-471e-bc25-f203987baad3`
+- Flow name: `Macro Flow`
+- Endpoint name: not configured
+- Langflow export tested version: `1.11.3`
+
+Confirmed graph edges:
+
+- `ChatInput-RkQmU` -> `Prompt Template-VgARU.profile`
+- `Prompt Template-VgARU` -> `ext:openrouter:OpenRouterComponent@official-snoVc.input_value`
+- `ext:openrouter:OpenRouterComponent@official-snoVc` -> `ChatOutput-mqlKE.input_value`
+
+Confirmed runtime fields:
+
+- API `input_value`: profile context text
+- Tweak component ID for goals: `Prompt Template-VgARU`
+- Tweak field for goals: `goals`
+
+Tutorial-era assumptions not used:
+
+- Do not use Bearer auth for this local v1 flow unless a future generated snippet says so. The current generated snippet uses `x-api-key`.
+- Do not assume an older response parser shape from a tutorial. The visible generated snippet prints `response.text`; the exact nested extraction path must be confirmed with a live call during the HTTP integration milestone.
+- Do not assume separate `Text Input` components exist in this Langflow UI. This export uses `ChatInput` for profile and a Prompt Template API field for goals.
+
+Current validation blocker:
+
+- Langflow was not reachable at `http://127.0.0.1:7860` during this repository validation pass, so no live API response body was captured in this step.
+
 ### Environment Variables
 
 Set these in local `.env` before implementing the Python Langflow integration:
