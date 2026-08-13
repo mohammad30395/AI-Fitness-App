@@ -322,3 +322,46 @@ Notes collection guardrails:
 - Endpoint and token were not printed.
 - No secrets recorded in BUILD_STATE.md.
 - No Langflow work performed.
+
+## Profile Database Operations
+
+Profile database operations milestone date/time:
+
+- 2026-08-13 13:55:09 +06 +0600
+
+Files added:
+
+- db.py
+- tests/test_db.py
+
+Public db.py API:
+
+- get_database()
+- get_personal_collection()
+- list_profiles()
+- get_profile(profile_id)
+- create_profile(profile_data)
+- update_personal_information(profile_id, updates)
+
+Implementation notes:
+
+- Uses config.py for ASTRA_DB_API_ENDPOINT, ASTRA_DB_APPLICATION_TOKEN, ASTRA_DB_KEYSPACE, and ASTRA_PERSONAL_COLLECTION.
+- Uses installed astrapy DataAPIClient and current collection methods: get_collection, find, find_one, insert_one, update_one.
+- ASTRA_DB_KEYSPACE is passed only when configured.
+- Profile validation happens at the application boundary.
+- _id is never accepted on create or update; Astra generates profile _id values.
+- update_personal_information checks that the profile exists before update and uses upsert=False.
+- No fake authentication system was created.
+- No Streamlit UI was created.
+- Notes operations were not implemented in db.py.
+
+Test result:
+
+- .venv/bin/python -m pytest: 29 passed
+
+Profile operations guardrails:
+
+- Unit tests use mocks and do not hit production Astra DB.
+- No live profile documents inserted, updated, deleted, or queried by tests.
+- No tokens or full database endpoint values printed.
+- No secrets recorded in BUILD_STATE.md.
