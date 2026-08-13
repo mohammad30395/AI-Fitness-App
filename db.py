@@ -1,6 +1,7 @@
 from numbers import Real
 import re
 from typing import Any
+from urllib.parse import urlparse
 
 from astrapy import DataAPIClient
 
@@ -92,6 +93,12 @@ def _get_required_env(name: str) -> str:
     return value
 
 
+def _validate_https_url(name: str, value: str) -> None:
+    parsed_url = urlparse(value)
+    if parsed_url.scheme != "https" or not parsed_url.netloc:
+        raise ConfigurationError(f"{name} must be a valid https URL.")
+
+
 def _positive_number(value: Any) -> bool:
     return isinstance(value, Real) and not isinstance(value, bool) and value > 0
 
@@ -150,13 +157,22 @@ def _validate_profile_fields(data: dict[str, Any], *, partial: bool) -> dict[str
             raise InvalidProfileError(f"{field} must be a positive number")
 
     for field in ("gender", "activity_level"):
-        if field in validated and not isinstance(validated[field], str):
-            raise InvalidProfileError(f"{field} must be a string")
+        if field in validated:
+            if not isinstance(validated[field], str) or not validated[field].strip():
+                raise InvalidProfileError(f"{field} must be a non-empty string")
+            validated[field] = validated[field].strip()
 
     if "goals" in validated:
         goals = validated["goals"]
         if not isinstance(goals, list) or not all(isinstance(goal, str) for goal in goals):
             raise InvalidProfileError("goals must be a list of strings")
+        cleaned_goals = []
+        for goal in goals:
+            cleaned_goal = goal.strip()
+            if not cleaned_goal:
+                raise InvalidProfileError("goals must be a list of non-empty strings")
+            cleaned_goals.append(cleaned_goal)
+        validated["goals"] = cleaned_goals
 
     if "nutrition" in validated and validated["nutrition"] is not None:
         validated["nutrition"] = _validate_nutrition(validated["nutrition"])
@@ -209,6 +225,7 @@ def get_database():
     endpoint = _get_required_env("ASTRA_DB_API_ENDPOINT")
     token = _get_required_env("ASTRA_DB_APPLICATION_TOKEN")
     keyspace = config.get_env_value("ASTRA_DB_KEYSPACE").strip()
+    _validate_https_url("ASTRA_DB_API_ENDPOINT", endpoint)
 
     try:
         client = DataAPIClient(token)

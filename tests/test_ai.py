@@ -115,6 +115,25 @@ def test_run_flow_success_posts_current_langflow_contract(monkeypatch):
     ]
 
 
+def test_run_flow_rejects_remote_plain_http_langflow_url(monkeypatch):
+    values = {
+        "LANGFLOW_URL": "http://langflow.example.test",
+        "LANGFLOW_API_KEY": "secret-langflow-key",
+    }
+    monkeypatch.setattr(ai.config, "get_env_value", lambda name: values.get(name, ""))
+
+    def fake_post(url, *, headers, json, timeout):
+        raise AssertionError("requests.post must not be called for insecure remote URL")
+
+    monkeypatch.setattr(ai.requests, "post", fake_post)
+
+    with pytest.raises(ai.LangflowConfigError) as exc_info:
+        ai.run_flow("flow-123", "profile context")
+
+    assert "https" in str(exc_info.value)
+    assert "secret-langflow-key" not in str(exc_info.value)
+
+
 @pytest.mark.parametrize("status_code", [401, 403, 404, 500])
 def test_run_flow_http_errors_call_raise_for_status(monkeypatch, status_code):
     patch_langflow_config(monkeypatch)

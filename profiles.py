@@ -128,8 +128,9 @@ def _normalize_goals(goals: Any) -> list[str]:
     if goals is None:
         return []
     if not isinstance(goals, list):
-        return [str(goals)]
-    return [str(goal) for goal in goals]
+        cleaned_goal = str(goals).strip()
+        return [cleaned_goal] if cleaned_goal else []
+    return [str(goal).strip() for goal in goals if str(goal).strip()]
 
 
 def _normalize_nutrition(nutrition: dict[str, Any]) -> dict[str, Any]:

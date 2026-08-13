@@ -4,6 +4,7 @@ import json
 import re
 from collections.abc import Mapping
 from typing import Any
+from urllib.parse import urlparse
 
 import requests
 
@@ -61,6 +62,16 @@ def _require_config_value(name: str) -> str:
 
 def _build_run_url(base_url: str, flow_id: str) -> str:
     cleaned_base_url = base_url.rstrip("/")
+    parsed_url = urlparse(cleaned_base_url)
+    if parsed_url.scheme not in {"http", "https"} or not parsed_url.netloc:
+        raise LangflowConfigError("LANGFLOW_URL must be a valid http(s) URL.")
+    if parsed_url.scheme == "http" and parsed_url.hostname not in {
+        "127.0.0.1",
+        "localhost",
+        "::1",
+    }:
+        raise LangflowConfigError("LANGFLOW_URL must use https for non-local hosts.")
+
     cleaned_flow_id = flow_id.strip().strip("/")
     if not cleaned_flow_id:
         raise LangflowConfigError("flow_id is required.")

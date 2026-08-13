@@ -91,6 +91,26 @@ def test_get_database_rejects_missing_required_configuration(monkeypatch, values
     assert missing_name in str(exc_info.value)
 
 
+def test_get_database_rejects_non_https_astra_endpoint(monkeypatch):
+    values = {
+        "ASTRA_DB_API_ENDPOINT": "http://astra.example.test",
+        "ASTRA_DB_APPLICATION_TOKEN": "AstraCS:super-secret-token",
+    }
+    monkeypatch.setattr(db.config, "get_env_value", lambda name: values.get(name, ""))
+
+    class FakeClient:
+        def __init__(self, token):
+            raise AssertionError("DataAPIClient must not be created for insecure endpoint")
+
+    monkeypatch.setattr(db, "DataAPIClient", FakeClient)
+
+    with pytest.raises(db.ConfigurationError) as exc_info:
+        db.get_database()
+
+    assert "ASTRA_DB_API_ENDPOINT" in str(exc_info.value)
+    assert "https" in str(exc_info.value)
+
+
 def test_get_database_wraps_connection_error_without_token(monkeypatch):
     values = patch_config(monkeypatch)
 
@@ -203,9 +223,14 @@ def test_create_profile_validates_and_returns_inserted_id(monkeypatch):
         ("age", 2.5),
         ("weight", -1),
         ("height", 0),
+        ("gender", ""),
+        ("gender", "   "),
         ("gender", 123),
+        ("activity_level", ""),
+        ("activity_level", "   "),
         ("activity_level", None),
         ("goals", ["valid", 123]),
+        ("goals", ["valid", "   "]),
         ("nutrition", {"calories": -1}),
     ],
 )
