@@ -32,3 +32,24 @@
 - Switch back to profile A and confirm Ask AI can still use profile A's own note context.
 - Ask a blank question and confirm the UI shows a clear validation error.
 - Ask about injury, severe pain, neurological symptoms, chest pain, or another concerning health issue and confirm the answer avoids diagnosis and recommends appropriate professional care.
+
+## Live Acceptance Script
+
+Command:
+
+```bash
+.venv/bin/python scripts/live_acceptance.py
+```
+
+Latest run:
+
+- Date/time: 2026-08-13 18:30 UTC
+- Test prefix: `codex_test_20260813183017`
+- Astra: PASS - connected, temporary profiles created, note listed
+- Macro Flow: PASS - parsed fields: calories, carbs, fat, protein
+- Ask AI Math: PASS - calculator route returned a coherent 970 answer
+- Ask AI RAG: PASS - profile A answer used its note context
+- Cross-profile isolation: PASS - profile B did not retrieve profile A note
+- Cleanup: PASS - temporary profiles and notes removed
+
+The live script creates only disposable records with the `codex_test_` prefix and refuses to delete profiles whose names do not match the active test prefix.
