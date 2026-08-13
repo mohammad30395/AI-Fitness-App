@@ -482,3 +482,65 @@ Profile service guardrails:
 - No live profile data inserted, updated, deleted, or queried.
 - No tokens or full database endpoint values printed.
 - No secrets recorded in BUILD_STATE.md.
+
+## Langflow Macro Flow
+
+Macro Flow milestone date/time:
+
+- 2026-08-13 17:28:33 +06 +0600
+
+Files added:
+
+- docs/LANGFLOW_SETUP.md
+- flows/macro_flow.json
+
+Langflow runtime:
+
+- Langflow URL used during manual build: http://127.0.0.1:7860
+- Flow name: Macro Flow
+- Flow ID: d0c80780-b504-471e-bc25-f203987baad3
+
+Real exported component IDs:
+
+- Profile runtime input: ChatInput-RkQmU
+- Prompt Template: Prompt Template-VgARU
+- OpenRouter model: ext:openrouter:OpenRouterComponent@official-snoVc
+- Output: ChatOutput-mqlKE
+
+Runtime contract observed:
+
+- API version: v1
+- Endpoint path: /api/v1/run/d0c80780-b504-471e-bc25-f203987baad3
+- Auth header name: x-api-key
+- input_type: chat
+- output_type: chat
+- Profile context strategy: normal chat input_value
+- Goals strategy: Prompt Template tweak field goals on component Prompt Template-VgARU
+
+Model configuration:
+
+- Provider/component: OpenRouter
+- Model selected from actual available OpenRouter list: openai/gpt-4o-mini
+- Temperature: 0
+- System instruction: return only valid JSON, no markdown or extra text
+
+Playground verification:
+
+- Three synthetic tests succeeded.
+- Each output parsed as JSON with exactly calories, protein, fat, and carbs.
+- All four values were numeric.
+
+Export verification:
+
+- flows/macro_flow.json exists and is non-empty.
+- Export came from Langflow UI, not assistant-generated JSON.
+- Save with my API keys was unchecked during export.
+- Export inspection found no obvious OpenRouter or Astra secret strings.
+
+Macro Flow guardrails:
+
+- OpenRouter remains inside Langflow.
+- No OpenRouter SDK was added to app requirements.
+- ai.py and get_macros() were not implemented.
+- Ask AI V2 was not created.
+- No real secret was recorded in docs or exported flow.
