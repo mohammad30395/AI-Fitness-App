@@ -365,3 +365,59 @@ Profile operations guardrails:
 - No live profile documents inserted, updated, deleted, or queried by tests.
 - No tokens or full database endpoint values printed.
 - No secrets recorded in BUILD_STATE.md.
+
+## Note Database Operations
+
+Note database operations milestone date/time:
+
+- 2026-08-13 14:03:02 +06 +0600
+
+Files updated:
+
+- db.py
+- docs/BUILD_STATE.md
+
+Files added:
+
+- tests/test_db_notes.py
+- scripts/smoke_notes.py
+
+Public db.py note API:
+
+- get_notes_collection()
+- add_note(user_id, text)
+- list_notes(user_id, limit=50)
+- delete_note(user_id, note_id)
+- update_note(user_id, note_id, text)
+
+Implementation notes:
+
+- Uses config.py for ASTRA_NOTES_COLLECTION.
+- Every note write includes user_id.
+- Readable note text is stored in text.
+- Vectorize-enabled writes also send $vectorize with the same note text.
+- No $vector value is manually generated or stored by the application.
+- list_notes filters by user_id and limit.
+- delete_note and update_note use filters containing both _id and user_id.
+- update_note refreshes both text and $vectorize with upsert=False.
+- Semantic search was not implemented in Python; RAG retrieval remains delegated to Langflow/Astra.
+
+Manual smoke script:
+
+- scripts/smoke_notes.py supports --user-id or SMOKE_PROFILE_ID.
+- It requires --confirm-write-delete before inserting and deleting one clearly marked test note.
+- Dry-run verification was executed without modifying data.
+
+Test result:
+
+- .venv/bin/python -m pytest: 41 passed
+- .venv/bin/python scripts/smoke_notes.py --user-id dry-run-profile: dry run only, no data modified
+
+Note operations guardrails:
+
+- Unit tests use mocks and do not hit production Astra DB.
+- No destructive smoke-test path was run.
+- No sample notes inserted into live Astra DB during this milestone.
+- No notes outside the explicitly supplied user_id can be deleted or updated through db.py helpers.
+- No tokens or full database endpoint values printed.
+- No secrets recorded in BUILD_STATE.md.

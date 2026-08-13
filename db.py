@@ -42,6 +42,14 @@ class InvalidProfileError(ValueError):
     pass
 
 
+class NoteNotFoundError(LookupError):
+    pass
+
+
+class InvalidNoteError(ValueError):
+    pass
+
+
 def _get_required_env(name: str) -> str:
     value = config.get_env_value(name).strip()
     if not value:
@@ -135,6 +143,33 @@ def _inserted_id(insert_result: Any) -> Any:
     return insert_result
 
 
+def _validate_user_id(user_id: Any) -> str:
+    if not isinstance(user_id, str) or not user_id.strip():
+        raise InvalidNoteError("user_id must be a non-empty string")
+    return user_id.strip()
+
+
+def _validate_note_id(note_id: Any) -> Any:
+    if not note_id:
+        raise InvalidNoteError("note_id is required")
+    return note_id
+
+
+def _validate_note_text(text: Any) -> str:
+    if not isinstance(text, str) or not text.strip():
+        raise InvalidNoteError("note text must be a non-empty string")
+    return text.strip()
+
+
+def _note_document(user_id: Any, text: Any) -> dict[str, Any]:
+    validated_text = _validate_note_text(text)
+    return {
+        "user_id": _validate_user_id(user_id),
+        "text": validated_text,
+        "$vectorize": validated_text,
+    }
+
+
 def get_database():
     endpoint = _get_required_env("ASTRA_DB_API_ENDPOINT")
     token = _get_required_env("ASTRA_DB_APPLICATION_TOKEN")
@@ -151,6 +186,15 @@ def get_personal_collection():
         config.get_env_value("ASTRA_PERSONAL_COLLECTION").strip()
         or config.ASTRA_PERSONAL_COLLECTION
         or "personal_data"
+    )
+    return get_database().get_collection(collection_name)
+
+
+def get_notes_collection():
+    collection_name = (
+        config.get_env_value("ASTRA_NOTES_COLLECTION").strip()
+        or config.ASTRA_NOTES_COLLECTION
+        or "notes"
     )
     return get_database().get_collection(collection_name)
 
@@ -195,4 +239,58 @@ def update_personal_information(profile_id: Any, updates: dict[str, Any]) -> dic
     normalized = _normalize_document(updated)
     if normalized is None:
         raise ProfileNotFoundError(f"Profile not found after update: {profile_id}")
+    return normalized
+
+
+def add_note(user_id: Any, text: Any) -> Any:
+    document = _note_document(user_id, text)
+    result = get_notes_collection().insert_one(document)
+    return _inserted_id(result)
+
+
+def list_notes(user_id: Any, limit: int = 50) -> list[dict[str, Any]]:
+    validated_user_id = _validate_user_id(user_id)
+    if not isinstance(limit, int) or isinstance(limit, bool) or limit <= 0:
+        raise InvalidNoteError("limit must be a positive integer")
+
+    documents = get_notes_collection().find(
+        {"user_id": validated_user_id},
+        limit=limit,
+    )
+    return [_normalize_document(document) for document in documents]
+
+
+def delete_note(user_id: Any, note_id: Any) -> bool:
+    validated_user_id = _validate_user_id(user_id)
+    validated_note_id = _validate_note_id(note_id)
+    collection = get_notes_collection()
+    note_filter = {"_id": validated_note_id, "user_id": validated_user_id}
+
+    if collection.find_one(note_filter) is None:
+        raise NoteNotFoundError(f"Note not found for this user: {validated_note_id}")
+
+    collection.delete_one(note_filter)
+    return True
+
+
+def update_note(user_id: Any, note_id: Any, text: Any) -> dict[str, Any]:
+    validated_user_id = _validate_user_id(user_id)
+    validated_note_id = _validate_note_id(note_id)
+    validated_text = _validate_note_text(text)
+    collection = get_notes_collection()
+    note_filter = {"_id": validated_note_id, "user_id": validated_user_id}
+
+    if collection.find_one(note_filter) is None:
+        raise NoteNotFoundError(f"Note not found for this user: {validated_note_id}")
+
+    collection.update_one(
+        note_filter,
+        {"$set": {"text": validated_text, "$vectorize": validated_text}},
+        upsert=False,
+    )
+
+    updated = collection.find_one(note_filter)
+    normalized = _normalize_document(updated)
+    if normalized is None:
+        raise NoteNotFoundError(f"Note not found after update: {validated_note_id}")
     return normalized
