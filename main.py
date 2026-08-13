@@ -1,5 +1,6 @@
 import streamlit as st
 
+import ai
 import profiles
 
 
@@ -8,9 +9,14 @@ SESSION_DEFAULTS = {
     "selected_profile": None,
     "profiles": [],
     "nutrition": None,
+    "nutrition_draft": None,
+    "nutrition_draft_profile_id": None,
+    "nutrition_draft_version": 0,
     "last_ai_answer": "",
     "ui_error": None,
     "profile_success": None,
+    "macro_success": None,
+    "macro_error": None,
 }
 
 
@@ -44,12 +50,37 @@ def _safe_profile_error(action: str, error: Exception) -> str:
     return f"{action} failed ({type(error).__name__}). Check profile fields and database configuration."
 
 
+def _safe_macro_error(action: str, error: Exception) -> str:
+    return f"{action} failed ({type(error).__name__}). Check Langflow configuration and macro output."
+
+
 def _profile_label(profile_id) -> str:
     for profile in st.session_state.get("profiles", []):
         if str(profile.get("_id")) == str(profile_id):
             name = profile.get("name") or "Unnamed profile"
             return f"{name} ({profile_id})"
     return str(profile_id)
+
+
+def _copy_nutrition(nutrition):
+    if isinstance(nutrition, dict) and nutrition:
+        return dict(nutrition)
+    return None
+
+
+def _set_selected_profile(profile: dict | None) -> None:
+    st.session_state["selected_profile"] = profile
+    stored_nutrition = _copy_nutrition(profile.get("nutrition")) if profile else None
+    st.session_state["nutrition"] = stored_nutrition
+    _set_nutrition_draft(profile.get("_id") if profile else None, stored_nutrition)
+
+
+def _set_nutrition_draft(profile_id, nutrition) -> None:
+    st.session_state["nutrition_draft"] = _copy_nutrition(nutrition)
+    st.session_state["nutrition_draft_profile_id"] = profile_id
+    st.session_state["nutrition_draft_version"] = (
+        int(st.session_state.get("nutrition_draft_version") or 0) + 1
+    )
 
 
 def _refresh_profiles(select_profile_id=None) -> bool:
@@ -64,16 +95,16 @@ def _refresh_profiles(select_profile_id=None) -> bool:
 
         selected_id = st.session_state.get("selected_profile_id")
         if selected_id is not None:
-            st.session_state["selected_profile"] = profiles.get_profile_by_id(selected_id)
+            _set_selected_profile(profiles.get_profile_by_id(selected_id))
         else:
-            st.session_state["selected_profile"] = None
+            _set_selected_profile(None)
 
         st.session_state["ui_error"] = None
         return True
     except Exception as error:
         st.session_state["ui_error"] = _safe_profile_error("Loading profiles", error)
         st.session_state["profiles"] = []
-        st.session_state["selected_profile"] = None
+        _set_selected_profile(None)
         return False
 
 
@@ -200,7 +231,7 @@ def render_profile_section() -> None:
             if str(selected_id) != str(st.session_state.get("selected_profile_id")):
                 try:
                     st.session_state["selected_profile_id"] = selected_id
-                    st.session_state["selected_profile"] = profiles.get_profile_by_id(selected_id)
+                    _set_selected_profile(profiles.get_profile_by_id(selected_id))
                     st.session_state["ui_error"] = None
                     st.rerun()
                 except Exception as error:
@@ -227,15 +258,113 @@ def render_profile_section() -> None:
 def render_nutrition_section() -> None:
     st.header("Nutrition / Macros")
     with st.container(border=True):
+        selected_profile = st.session_state.get("selected_profile")
+        if not selected_profile:
+            st.info("Select or create a profile before generating nutrition targets.")
+            return
+
+        st.caption("Generated targets are approximate general fitness guidance.")
+
         nutrition = st.session_state.get("nutrition")
         if nutrition:
+            st.subheader("Stored targets")
             calories, protein, fat, carbs = st.columns(4)
-            calories.metric("Calories", nutrition.get("calories", "-"))
-            protein.metric("Protein", nutrition.get("protein", "-"))
-            fat.metric("Fat", nutrition.get("fat", "-"))
-            carbs.metric("Carbs", nutrition.get("carbs", "-"))
+            calories.metric("Calories", f"{nutrition.get('calories', '-')} kcal/day")
+            protein.metric("Protein", f"{nutrition.get('protein', '-')} g/day")
+            fat.metric("Fat", f"{nutrition.get('fat', '-')} g/day")
+            carbs.metric("Carbs", f"{nutrition.get('carbs', '-')} g/day")
         else:
-            st.write("Macro targets will appear here after generation is wired.")
+            st.write("No nutrition targets are saved for this profile yet.")
+
+        if st.session_state.get("macro_success"):
+            st.success(st.session_state["macro_success"])
+        if st.session_state.get("macro_error"):
+            st.error(st.session_state["macro_error"])
+
+        if st.button("Generate with AI"):
+            try:
+                profile_context = profiles.build_profile_context(selected_profile)
+                goals = _goals_to_text(selected_profile).strip() or "No specific goals provided."
+                with st.spinner("Generating approximate macro targets..."):
+                    generated_nutrition = ai.get_macros(profile_context, goals)
+                _set_nutrition_draft(selected_profile.get("_id"), generated_nutrition)
+                st.session_state["macro_success"] = (
+                    "AI suggestions generated. Review and save to apply them."
+                )
+                st.session_state["macro_error"] = None
+                st.rerun()
+            except Exception as error:
+                st.session_state["macro_success"] = None
+                st.session_state["macro_error"] = _safe_macro_error("Generating macros", error)
+                st.rerun()
+
+        draft = st.session_state.get("nutrition_draft")
+        if str(st.session_state.get("nutrition_draft_profile_id")) != str(selected_profile.get("_id")):
+            draft = nutrition
+
+        defaults = draft or nutrition or {
+            "calories": 2000,
+            "protein": 120,
+            "fat": 70,
+            "carbs": 250,
+        }
+        form_key = f"nutrition_form_{st.session_state.get('nutrition_draft_version', 0)}"
+
+        st.subheader("Review and save")
+        with st.form(form_key):
+            calories = st.number_input(
+                "Calories (kcal/day)",
+                min_value=500.0,
+                max_value=10000.0,
+                step=50.0,
+                value=float(defaults.get("calories", 2000)),
+            )
+            protein = st.number_input(
+                "Protein (g/day)",
+                min_value=1.0,
+                max_value=500.0,
+                step=5.0,
+                value=float(defaults.get("protein", 120)),
+            )
+            fat = st.number_input(
+                "Fat (g/day)",
+                min_value=1.0,
+                max_value=400.0,
+                step=5.0,
+                value=float(defaults.get("fat", 70)),
+            )
+            carbs = st.number_input(
+                "Carbs (g/day)",
+                min_value=1.0,
+                max_value=1000.0,
+                step=5.0,
+                value=float(defaults.get("carbs", 250)),
+            )
+            submitted = st.form_submit_button("Save / Apply nutrition")
+
+        if not submitted:
+            return
+
+        nutrition_payload = {
+            "calories": float(calories),
+            "protein": float(protein),
+            "fat": float(fat),
+            "carbs": float(carbs),
+        }
+        try:
+            profile_id = selected_profile.get("_id")
+            if not profile_id:
+                raise ValueError("No profile selected")
+            updated_profile = profiles.save_profile_changes(profile_id, nutrition=nutrition_payload)
+            st.session_state["selected_profile_id"] = updated_profile.get("_id", profile_id)
+            _refresh_profiles(st.session_state["selected_profile_id"])
+            st.session_state["macro_success"] = "Nutrition targets saved."
+            st.session_state["macro_error"] = None
+            st.rerun()
+        except Exception as error:
+            st.session_state["macro_success"] = None
+            st.session_state["macro_error"] = _safe_macro_error("Saving nutrition", error)
+            st.rerun()
 
 
 def render_notes_section() -> None:
