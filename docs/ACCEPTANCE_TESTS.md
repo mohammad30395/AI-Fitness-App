@@ -23,3 +23,12 @@
 - Add a different unique synthetic note to profile B.
 - Switch back to profile A and confirm profile A's note is still visible.
 - Delete profile A's note using the confirmation step and confirm profile B's notes are unchanged.
+
+## Ask AI UI
+
+- Select a profile and ask a calculator-style question, such as calories remaining after meals, and confirm the answer comes back without a page crash.
+- Add a unique synthetic note to profile A, then ask a general fitness question that should reference that note.
+- Switch to profile B and ask a similar note-based question; confirm profile A's unique note is not referenced.
+- Switch back to profile A and confirm Ask AI can still use profile A's own note context.
+- Ask a blank question and confirm the UI shows a clear validation error.
+- Ask about injury, severe pain, neurological symptoms, chest pain, or another concerning health issue and confirm the answer avoids diagnosis and recommends appropriate professional care.

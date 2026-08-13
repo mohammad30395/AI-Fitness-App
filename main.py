@@ -23,6 +23,7 @@ SESSION_DEFAULTS = {
     "notes_success": None,
     "notes_error": None,
     "confirm_delete_note_id": None,
+    "ask_ai_error": None,
 }
 
 
@@ -62,6 +63,10 @@ def _safe_macro_error(action: str, error: Exception) -> str:
 
 def _safe_notes_error(action: str, error: Exception) -> str:
     return f"{action} failed ({type(error).__name__}). Check note text and Astra notes configuration."
+
+
+def _safe_ask_ai_error(action: str, error: Exception) -> str:
+    return f"{action} failed ({type(error).__name__}). Check Langflow Ask AI configuration and try again."
 
 
 def _profile_label(profile_id) -> str:
@@ -485,9 +490,53 @@ def render_notes_section() -> None:
 def render_ask_ai_section() -> None:
     st.header("Ask AI")
     with st.container(border=True):
-        st.write("Ask AI responses will appear here after Langflow calls are wired.")
+        selected_profile = st.session_state.get("selected_profile")
+        if not selected_profile:
+            st.info("Select or create a profile before asking AI.")
+            return
+
+        user_id = str(selected_profile.get("_id") or "").strip()
+        if not user_id:
+            st.error("Selected profile is missing an ID.")
+            return
+
+        st.caption(
+            "Ask general fitness questions. For injury, severe pain, neurological symptoms, "
+            "chest pain, or other concerning health issues, this assistant should not diagnose "
+            "and should recommend appropriate professional care."
+        )
+
+        if st.session_state.get("ask_ai_error"):
+            st.error(st.session_state["ask_ai_error"])
+
+        with st.form("ask_ai_form"):
+            question = st.text_area(
+                "Question",
+                placeholder="Example: Based on my notes, how should I structure next week?",
+                height=100,
+            )
+            submitted = st.form_submit_button("Ask AI")
+
+        if submitted:
+            if not question.strip():
+                st.session_state["ask_ai_error"] = "Ask AI failed: question cannot be empty."
+                st.rerun()
+
+            try:
+                profile_context = profiles.build_profile_context(selected_profile)
+                with st.spinner("Asking AI..."):
+                    answer = ai.ask_ai(question, profile_context, user_id)
+                st.session_state["last_ai_answer"] = answer
+                st.session_state["ask_ai_error"] = None
+                st.rerun()
+            except Exception as error:
+                st.session_state["last_ai_answer"] = ""
+                st.session_state["ask_ai_error"] = _safe_ask_ai_error("Ask AI", error)
+                st.rerun()
+
         last_answer = st.session_state.get("last_ai_answer")
         if last_answer:
+            st.subheader("Last answer")
             st.markdown(last_answer)
 
 
