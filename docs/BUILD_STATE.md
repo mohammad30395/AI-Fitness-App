@@ -168,3 +168,44 @@ Configuration guardrails:
 - No Astra DB collections created.
 - No Langflow flows created.
 - No application logic created.
+
+## Astra DB Connectivity
+
+Astra connectivity milestone date/time:
+
+- 2026-08-13 13:32:37 +06 +0600
+
+Files added:
+
+- scripts/check_astra.py
+- tests/test_check_astra.py
+
+Files updated:
+
+- .gitignore
+- docs/BUILD_STATE.md
+
+AstraPy behavior used:
+
+- Installed astrapy version: 2.3.1
+- DataAPIClient imported from astrapy.
+- Database object obtained with DataAPIClient(...).get_database(...).
+- ASTRA_DB_KEYSPACE is passed only when configured; it is not forced when blank.
+- Read-only inspection uses database.list_collection_names().
+
+Smoke test result:
+
+- .venv/bin/python scripts/check_astra.py: passed
+- Accessible collections inspected: 0
+
+Test result:
+
+- .venv/bin/python -m pytest: 4 passed
+
+Connectivity guardrails:
+
+- Endpoint and token were not printed.
+- No secrets recorded in BUILD_STATE.md.
+- No inserts, updates, deletes, truncates, drops, or collection creation attempted.
+- personal_data and notes collections were not created.
+- No Langflow work performed.
