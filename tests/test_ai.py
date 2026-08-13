@@ -125,11 +125,12 @@ def test_run_flow_auth_errors_call_raise_for_status(monkeypatch, status_code):
 
     monkeypatch.setattr(ai.requests, "post", fake_post)
 
-    with pytest.raises(requests.HTTPError) as exc_info:
+    with pytest.raises(ai.LangflowHTTPError) as exc_info:
         ai.run_flow("flow-123", "profile context")
 
     assert str(status_code) in str(exc_info.value)
     assert "secret-langflow-key" not in str(exc_info.value)
+    assert exc_info.value.__cause__ is http_error
 
 
 def test_run_flow_timeout_propagates_without_secret(monkeypatch):
@@ -140,10 +141,30 @@ def test_run_flow_timeout_propagates_without_secret(monkeypatch):
 
     monkeypatch.setattr(ai.requests, "post", fake_post)
 
-    with pytest.raises(requests.Timeout) as exc_info:
+    with pytest.raises(ai.LangflowTimeoutError) as exc_info:
         ai.run_flow("flow-123", "profile context", timeout=5)
 
     assert "secret-langflow-key" not in str(exc_info.value)
+    assert "5 seconds" in str(exc_info.value)
+
+
+def test_run_flow_connection_error_sanitizes_diagnostics(monkeypatch):
+    patch_langflow_config(monkeypatch)
+
+    def fake_post(url, *, headers, json, timeout):
+        raise requests.ConnectionError(
+            "failed with secret-langflow-key and http://user:password@example.test"
+        )
+
+    monkeypatch.setattr(ai.requests, "post", fake_post)
+
+    with pytest.raises(ai.LangflowConnectionError) as exc_info:
+        ai.run_flow("flow-123", "profile context")
+
+    message = str(exc_info.value)
+    assert "secret-langflow-key" not in message
+    assert "password" not in message
+    assert "<redacted:LANGFLOW_API_KEY>" in message
 
 
 def test_run_flow_non_json_response_raises_clear_error(monkeypatch):
@@ -245,6 +266,14 @@ def test_get_macros_rejects_missing_macro_configuration(monkeypatch, values):
         ai.get_macros("profile context", "build strength")
 
 
+@pytest.mark.parametrize("profile_context", ["", "   ", None])
+def test_get_macros_rejects_blank_profile_context(monkeypatch, profile_context):
+    patch_macro_config(monkeypatch)
+
+    with pytest.raises(ValueError, match="profile_context"):
+        ai.get_macros(profile_context, "build strength")
+
+
 def test_ask_ai_uses_configured_flow_and_runtime_tweaks(monkeypatch):
     patch_ask_ai_config(monkeypatch)
     calls = []
@@ -290,6 +319,22 @@ def test_ask_ai_rejects_blank_questions(monkeypatch, question):
 
     with pytest.raises(ValueError, match="question"):
         ai.ask_ai(question, "profile context", "profile-1")
+
+
+@pytest.mark.parametrize(
+    ("profile_context", "user_id", "match"),
+    [
+        ("", "profile-1", "profile_context"),
+        ("profile context", "", "user_id"),
+        (None, "profile-1", "profile_context"),
+        ("profile context", None, "user_id"),
+    ],
+)
+def test_ask_ai_rejects_blank_runtime_context(monkeypatch, profile_context, user_id, match):
+    patch_ask_ai_config(monkeypatch)
+
+    with pytest.raises(ValueError, match=match):
+        ai.ask_ai("What should I do next week?", profile_context, user_id)
 
 
 @pytest.mark.parametrize(

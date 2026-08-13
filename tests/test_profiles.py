@@ -1,3 +1,5 @@
+import pytest
+
 import profiles
 from utils import dict_to_string
 
@@ -54,6 +56,12 @@ def test_normalize_profile_keeps_nutrition_optional():
 
     assert "nutrition" not in normalized
     assert normalized["goals"] == ["strength", "mobility"]
+
+
+@pytest.mark.parametrize("profile", [None, [], "not a profile"])
+def test_normalize_profile_rejects_non_dictionary_values(profile):
+    with pytest.raises(profiles.ProfileDataError):
+        profiles.normalize_profile(profile)
 
 
 def test_build_profile_context_is_deterministic_and_human_readable():

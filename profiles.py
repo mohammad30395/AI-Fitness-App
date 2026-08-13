@@ -4,6 +4,10 @@ import db
 from utils import dict_to_string
 
 
+class ProfileDataError(ValueError):
+    """Raised when profile data cannot be normalized safely."""
+
+
 PROFILE_FIELD_ORDER = (
     "_id",
     "name",
@@ -20,6 +24,9 @@ NUTRITION_FIELD_ORDER = ("calories", "protein", "fat", "carbs")
 
 
 def normalize_profile(profile: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(profile, dict):
+        raise ProfileDataError("Profile data must be a dictionary.")
+
     normalized: dict[str, Any] = {}
     for field in PROFILE_FIELD_ORDER:
         if field in profile:

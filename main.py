@@ -1,9 +1,15 @@
+import logging
+import re
+
 import streamlit as st
 
 import ai
+import config
 import db
 import profiles
 
+
+logger = logging.getLogger(__name__)
 
 SESSION_DEFAULTS = {
     "selected_profile_id": None,
@@ -25,6 +31,27 @@ SESSION_DEFAULTS = {
     "confirm_delete_note_id": None,
     "ask_ai_error": None,
 }
+
+
+def _sanitize_diagnostic(message: str) -> str:
+    sanitized = str(message)
+    for name in config.ALL_VARIABLES:
+        value = config.get_env_value(name)
+        if value and len(value) >= 4:
+            sanitized = sanitized.replace(value, f"<redacted:{name}>")
+    sanitized = re.sub(r"AstraCS:[A-Za-z0-9._:-]+", "<redacted:ASTRA_TOKEN>", sanitized)
+    sanitized = re.sub(r"sk-[A-Za-z0-9._-]+", "<redacted:API_KEY>", sanitized)
+    sanitized = re.sub(r"(https?://)([^/@\s]+):([^/@\s]+)@", r"\1<redacted>@", sanitized)
+    return sanitized
+
+
+def _record_ui_failure(action: str, error: Exception) -> None:
+    logger.warning(
+        "%s failed: %s: %s",
+        action,
+        type(error).__name__,
+        _sanitize_diagnostic(str(error)),
+    )
 
 
 def _default_session_value(value):
@@ -120,6 +147,7 @@ def _refresh_profiles(select_profile_id=None) -> bool:
         st.session_state["ui_error"] = None
         return True
     except Exception as error:
+        _record_ui_failure("Loading profiles", error)
         st.session_state["ui_error"] = _safe_profile_error("Loading profiles", error)
         st.session_state["profiles"] = []
         _set_selected_profile(None)
@@ -133,6 +161,7 @@ def _refresh_notes(user_id: str) -> bool:
         st.session_state["notes_error"] = None
         return True
     except Exception as error:
+        _record_ui_failure("Loading notes", error)
         st.session_state["notes"] = []
         st.session_state["notes_profile_id"] = None
         st.session_state["notes_error"] = _safe_notes_error("Loading notes", error)
@@ -226,6 +255,7 @@ def _render_profile_form(*, mode: str, profile: dict | None = None) -> None:
         st.session_state["ui_error"] = None
         st.rerun()
     except Exception as error:
+        _record_ui_failure("Saving profile", error)
         st.session_state["profile_success"] = None
         st.session_state["ui_error"] = _safe_profile_error("Saving profile", error)
         st.rerun()
@@ -266,6 +296,7 @@ def render_profile_section() -> None:
                     st.session_state["ui_error"] = None
                     st.rerun()
                 except Exception as error:
+                    _record_ui_failure("Selecting profile", error)
                     st.session_state["ui_error"] = _safe_profile_error("Selecting profile", error)
                     st.rerun()
         else:
@@ -325,6 +356,7 @@ def render_nutrition_section() -> None:
                 st.session_state["macro_error"] = None
                 st.rerun()
             except Exception as error:
+                _record_ui_failure("Generating macros", error)
                 st.session_state["macro_success"] = None
                 st.session_state["macro_error"] = _safe_macro_error("Generating macros", error)
                 st.rerun()
@@ -393,6 +425,7 @@ def render_nutrition_section() -> None:
             st.session_state["macro_error"] = None
             st.rerun()
         except Exception as error:
+            _record_ui_failure("Saving nutrition", error)
             st.session_state["macro_success"] = None
             st.session_state["macro_error"] = _safe_macro_error("Saving nutrition", error)
             st.rerun()
@@ -437,6 +470,7 @@ def render_notes_section() -> None:
                 st.session_state["notes_error"] = None
                 st.rerun()
             except Exception as error:
+                _record_ui_failure("Adding note", error)
                 st.session_state["notes_success"] = None
                 st.session_state["notes_error"] = _safe_notes_error("Adding note", error)
                 st.rerun()
@@ -472,6 +506,7 @@ def render_notes_section() -> None:
                                 st.session_state["notes_error"] = None
                                 st.rerun()
                             except Exception as error:
+                                _record_ui_failure("Deleting note", error)
                                 st.session_state["notes_success"] = None
                                 st.session_state["notes_error"] = _safe_notes_error(
                                     "Deleting note",
@@ -530,6 +565,7 @@ def render_ask_ai_section() -> None:
                 st.session_state["ask_ai_error"] = None
                 st.rerun()
             except Exception as error:
+                _record_ui_failure("Ask AI", error)
                 st.session_state["last_ai_answer"] = ""
                 st.session_state["ask_ai_error"] = _safe_ask_ai_error("Ask AI", error)
                 st.rerun()

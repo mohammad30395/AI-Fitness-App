@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Mapping
 from typing import Any
 
@@ -25,6 +26,30 @@ class LangflowConfigError(LangflowClientError):
 
 class LangflowResponseError(LangflowClientError):
     """Raised when Langflow returns an unexpected response shape."""
+
+
+class LangflowHTTPError(LangflowClientError):
+    """Raised when Langflow returns a non-success HTTP status."""
+
+
+class LangflowTimeoutError(LangflowClientError):
+    """Raised when a Langflow request times out."""
+
+
+class LangflowConnectionError(LangflowClientError):
+    """Raised when Langflow cannot be reached."""
+
+
+def _sanitize_diagnostic(message: Any) -> str:
+    sanitized = str(message)
+    for name in getattr(config, "ALL_VARIABLES", ()):
+        value = config.get_env_value(name)
+        if value and len(value) >= 4:
+            sanitized = sanitized.replace(value, f"<redacted:{name}>")
+    sanitized = re.sub(r"AstraCS:[A-Za-z0-9._:-]+", "AstraCS:<redacted>", sanitized)
+    sanitized = re.sub(r"sk-[A-Za-z0-9_-]+", "sk-<redacted>", sanitized)
+    sanitized = re.sub(r"(https?://)[^/\s:@]+:[^/\s@]+@", r"\1<redacted>@", sanitized)
+    return sanitized
 
 
 def _require_config_value(name: str) -> str:
@@ -142,16 +167,35 @@ def run_flow(
     if session_id:
         payload["session_id"] = session_id
 
-    response = requests.post(
-        url,
-        headers={
-            "Content-Type": "application/json",
-            "x-api-key": api_key,
-        },
-        json=payload,
-        timeout=timeout_value,
-    )
-    response.raise_for_status()
+    response = None
+    try:
+        response = requests.post(
+            url,
+            headers={
+                "Content-Type": "application/json",
+                "x-api-key": api_key,
+            },
+            json=payload,
+            timeout=timeout_value,
+        )
+        response.raise_for_status()
+    except requests.Timeout as exc:
+        raise LangflowTimeoutError(
+            f"Langflow request timed out after {timeout_value:g} seconds."
+        ) from exc
+    except requests.HTTPError as exc:
+        status_code = getattr(response, "status_code", None)
+        if status_code is None and getattr(exc, "response", None) is not None:
+            status_code = getattr(exc.response, "status_code", None)
+        status_label = status_code if status_code is not None else "unknown"
+        raise LangflowHTTPError(
+            f"Langflow HTTP request failed with status {status_label}."
+        ) from exc
+    except requests.RequestException as exc:
+        raise LangflowConnectionError(
+            f"Langflow request failed ({type(exc).__name__}): "
+            f"{_sanitize_diagnostic(str(exc))}"
+        ) from exc
 
     try:
         data = response.json()
@@ -163,6 +207,9 @@ def run_flow(
 
 def get_macros(profile_context: str, goals: str) -> dict[str, int | float]:
     """Run the configured Macro Flow and return normalized nutrition targets."""
+    if not isinstance(profile_context, str) or not profile_context.strip():
+        raise ValueError("profile_context must be a non-empty string.")
+
     flow_id = _require_config_value("MACRO_FLOW_ID")
     goals_component_id = _require_config_value("MACRO_GOALS_COMPONENT_ID")
 
@@ -189,6 +236,10 @@ def ask_ai(
     """Run Ask AI V2 through Langflow and return the final plain-text answer."""
     if not isinstance(question, str) or not question.strip():
         raise ValueError("question must be a non-empty string.")
+    if not isinstance(profile_context, str) or not profile_context.strip():
+        raise ValueError("profile_context must be a non-empty string.")
+    if not isinstance(user_id, str) or not user_id.strip():
+        raise ValueError("user_id must be a non-empty string.")
 
     flow_id = _require_config_value("ASK_AI_FLOW_ID")
     profile_component_id = _require_config_value("ASK_PROFILE_COMPONENT_ID")
@@ -205,7 +256,7 @@ def ask_ai(
                 "profile": profile_context,
             },
             user_id_component_id: {
-                "advanced_search_filter": json.dumps({"user_id": user_id}),
+                "advanced_search_filter": json.dumps({"user_id": user_id.strip()}),
             },
         },
     )

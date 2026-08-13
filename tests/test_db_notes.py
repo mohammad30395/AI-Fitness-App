@@ -85,6 +85,35 @@ def test_list_notes_rejects_invalid_limit(monkeypatch):
         db.list_notes("user-1", limit=0)
 
 
+def test_list_notes_rejects_blank_user_id_before_database_call(monkeypatch):
+    class FakeCollection:
+        def find(self, filter_doc, **kwargs):
+            raise AssertionError("database must not be called for invalid user_id")
+
+    monkeypatch.setattr(db, "get_notes_collection", lambda: FakeCollection())
+
+    with pytest.raises(db.InvalidNoteError):
+        db.list_notes(" ", limit=10)
+
+
+def test_add_note_wraps_database_error_without_token(monkeypatch):
+    secret = "AstraCS:super-secret-token"
+
+    class FakeCollection:
+        def insert_one(self, document):
+            raise RuntimeError(f"insert failed with {secret}")
+
+    monkeypatch.setattr(db, "get_notes_collection", lambda: FakeCollection())
+
+    with pytest.raises(db.DatabaseConnectionError) as exc_info:
+        db.add_note("user-1", "Readable note text")
+
+    message = str(exc_info.value)
+    assert "Adding note failed" in message
+    assert secret not in message
+    assert "AstraCS:<redacted>" in message
+
+
 def test_delete_note_uses_user_scoped_filter(monkeypatch):
     calls = []
 

@@ -57,6 +57,27 @@ def test_get_database_uses_config_and_optional_keyspace(monkeypatch):
     ]
 
 
+def test_get_database_wraps_connection_error_without_token(monkeypatch):
+    values = patch_config(monkeypatch)
+
+    class FakeClient:
+        def __init__(self, token):
+            assert token == values["ASTRA_DB_APPLICATION_TOKEN"]
+
+        def get_database(self, endpoint, **kwargs):
+            raise RuntimeError(f"auth failed for {values['ASTRA_DB_APPLICATION_TOKEN']}")
+
+    monkeypatch.setattr(db, "DataAPIClient", FakeClient)
+
+    with pytest.raises(db.DatabaseConnectionError) as exc_info:
+        db.get_database()
+
+    message = str(exc_info.value)
+    assert "Connecting to Astra DB failed" in message
+    assert values["ASTRA_DB_APPLICATION_TOKEN"] not in message
+    assert "<redacted:ASTRA_DB_APPLICATION_TOKEN>" in message
+
+
 def test_get_personal_collection_uses_configured_collection(monkeypatch):
     patch_config(monkeypatch)
     calls = []
@@ -89,6 +110,24 @@ def test_list_profiles_returns_plain_dicts(monkeypatch):
         {"_id": "one", "name": "Ada"},
         {"_id": "two", "name": "Grace"},
     ]
+
+
+def test_list_profiles_wraps_read_errors_without_secret(monkeypatch):
+    secret = "AstraCS:super-secret-token"
+
+    class FakeCollection:
+        def find(self, filter_doc):
+            raise RuntimeError(f"read failed with {secret}")
+
+    monkeypatch.setattr(db, "get_personal_collection", lambda: FakeCollection())
+
+    with pytest.raises(db.DatabaseConnectionError) as exc_info:
+        db.list_profiles()
+
+    message = str(exc_info.value)
+    assert "Listing profiles failed" in message
+    assert secret not in message
+    assert "AstraCS:<redacted>" in message
 
 
 def test_get_profile_returns_document_or_raises_not_found(monkeypatch):

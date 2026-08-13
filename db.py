@@ -1,4 +1,5 @@
 from numbers import Real
+import re
 from typing import Any
 
 from astrapy import DataAPIClient
@@ -34,6 +35,14 @@ class ConfigurationError(RuntimeError):
     pass
 
 
+class DatabaseError(RuntimeError):
+    pass
+
+
+class DatabaseConnectionError(DatabaseError):
+    pass
+
+
 class ProfileNotFoundError(LookupError):
     pass
 
@@ -48,6 +57,32 @@ class NoteNotFoundError(LookupError):
 
 class InvalidNoteError(ValueError):
     pass
+
+
+EXPECTED_APPLICATION_ERRORS = (
+    ConfigurationError,
+    ProfileNotFoundError,
+    InvalidProfileError,
+    NoteNotFoundError,
+    InvalidNoteError,
+)
+
+
+def _sanitize_diagnostic(message: Any) -> str:
+    sanitized = str(message)
+    for name in getattr(config, "ALL_VARIABLES", ()):
+        value = config.get_env_value(name)
+        if value and len(value) >= 4:
+            sanitized = sanitized.replace(value, f"<redacted:{name}>")
+    sanitized = re.sub(r"AstraCS:[A-Za-z0-9._:-]+", "AstraCS:<redacted>", sanitized)
+    sanitized = re.sub(r"(token|api[_ -]?key|authorization)=\S+", r"\1=<redacted>", sanitized, flags=re.I)
+    return sanitized
+
+
+def _wrap_database_error(action: str, error: Exception) -> DatabaseConnectionError:
+    return DatabaseConnectionError(
+        f"{action} failed ({type(error).__name__}): {_sanitize_diagnostic(str(error))}"
+    )
 
 
 def _get_required_env(name: str) -> str:
@@ -175,10 +210,15 @@ def get_database():
     token = _get_required_env("ASTRA_DB_APPLICATION_TOKEN")
     keyspace = config.get_env_value("ASTRA_DB_KEYSPACE").strip()
 
-    client = DataAPIClient(token)
-    if keyspace:
-        return client.get_database(endpoint, keyspace=keyspace)
-    return client.get_database(endpoint)
+    try:
+        client = DataAPIClient(token)
+        if keyspace:
+            return client.get_database(endpoint, keyspace=keyspace)
+        return client.get_database(endpoint)
+    except EXPECTED_APPLICATION_ERRORS:
+        raise
+    except Exception as error:
+        raise _wrap_database_error("Connecting to Astra DB", error) from error
 
 
 def get_personal_collection():
@@ -187,7 +227,12 @@ def get_personal_collection():
         or config.ASTRA_PERSONAL_COLLECTION
         or "personal_data"
     )
-    return get_database().get_collection(collection_name)
+    try:
+        return get_database().get_collection(collection_name)
+    except EXPECTED_APPLICATION_ERRORS:
+        raise
+    except Exception as error:
+        raise _wrap_database_error("Opening personal profile collection", error) from error
 
 
 def get_notes_collection():
@@ -196,28 +241,48 @@ def get_notes_collection():
         or config.ASTRA_NOTES_COLLECTION
         or "notes"
     )
-    return get_database().get_collection(collection_name)
+    try:
+        return get_database().get_collection(collection_name)
+    except EXPECTED_APPLICATION_ERRORS:
+        raise
+    except Exception as error:
+        raise _wrap_database_error("Opening notes collection", error) from error
 
 
 def list_profiles() -> list[dict[str, Any]]:
-    return [_normalize_document(document) for document in get_personal_collection().find({})]
+    try:
+        return [_normalize_document(document) for document in get_personal_collection().find({})]
+    except EXPECTED_APPLICATION_ERRORS:
+        raise
+    except Exception as error:
+        raise _wrap_database_error("Listing profiles", error) from error
 
 
 def get_profile(profile_id: Any) -> dict[str, Any]:
     if not profile_id:
         raise InvalidProfileError("profile_id is required")
 
-    document = get_personal_collection().find_one({"_id": profile_id})
-    normalized = _normalize_document(document)
-    if normalized is None:
-        raise ProfileNotFoundError(f"Profile not found: {profile_id}")
-    return normalized
+    try:
+        document = get_personal_collection().find_one({"_id": profile_id})
+        normalized = _normalize_document(document)
+        if normalized is None:
+            raise ProfileNotFoundError(f"Profile not found: {profile_id}")
+        return normalized
+    except EXPECTED_APPLICATION_ERRORS:
+        raise
+    except Exception as error:
+        raise _wrap_database_error("Loading profile", error) from error
 
 
 def create_profile(profile_data: dict[str, Any]) -> Any:
     document = _validate_profile_fields(profile_data, partial=False)
-    result = get_personal_collection().insert_one(document)
-    return _inserted_id(result)
+    try:
+        result = get_personal_collection().insert_one(document)
+        return _inserted_id(result)
+    except EXPECTED_APPLICATION_ERRORS:
+        raise
+    except Exception as error:
+        raise _wrap_database_error("Creating profile", error) from error
 
 
 def update_personal_information(profile_id: Any, updates: dict[str, Any]) -> dict[str, Any]:
@@ -228,24 +293,34 @@ def update_personal_information(profile_id: Any, updates: dict[str, Any]) -> dic
     if not update_document:
         raise InvalidProfileError("updates cannot be empty")
 
-    collection = get_personal_collection()
-    existing = collection.find_one({"_id": profile_id})
-    if existing is None:
-        raise ProfileNotFoundError(f"Profile not found: {profile_id}")
+    try:
+        collection = get_personal_collection()
+        existing = collection.find_one({"_id": profile_id})
+        if existing is None:
+            raise ProfileNotFoundError(f"Profile not found: {profile_id}")
 
-    collection.update_one({"_id": profile_id}, {"$set": update_document}, upsert=False)
+        collection.update_one({"_id": profile_id}, {"$set": update_document}, upsert=False)
 
-    updated = collection.find_one({"_id": profile_id})
-    normalized = _normalize_document(updated)
-    if normalized is None:
-        raise ProfileNotFoundError(f"Profile not found after update: {profile_id}")
-    return normalized
+        updated = collection.find_one({"_id": profile_id})
+        normalized = _normalize_document(updated)
+        if normalized is None:
+            raise ProfileNotFoundError(f"Profile not found after update: {profile_id}")
+        return normalized
+    except EXPECTED_APPLICATION_ERRORS:
+        raise
+    except Exception as error:
+        raise _wrap_database_error("Updating profile", error) from error
 
 
 def add_note(user_id: Any, text: Any) -> Any:
     document = _note_document(user_id, text)
-    result = get_notes_collection().insert_one(document)
-    return _inserted_id(result)
+    try:
+        result = get_notes_collection().insert_one(document)
+        return _inserted_id(result)
+    except EXPECTED_APPLICATION_ERRORS:
+        raise
+    except Exception as error:
+        raise _wrap_database_error("Adding note", error) from error
 
 
 def list_notes(user_id: Any, limit: int = 50) -> list[dict[str, Any]]:
@@ -253,44 +328,59 @@ def list_notes(user_id: Any, limit: int = 50) -> list[dict[str, Any]]:
     if not isinstance(limit, int) or isinstance(limit, bool) or limit <= 0:
         raise InvalidNoteError("limit must be a positive integer")
 
-    documents = get_notes_collection().find(
-        {"user_id": validated_user_id},
-        limit=limit,
-    )
-    return [_normalize_document(document) for document in documents]
+    try:
+        documents = get_notes_collection().find(
+            {"user_id": validated_user_id},
+            limit=limit,
+        )
+        return [_normalize_document(document) for document in documents]
+    except EXPECTED_APPLICATION_ERRORS:
+        raise
+    except Exception as error:
+        raise _wrap_database_error("Listing notes", error) from error
 
 
 def delete_note(user_id: Any, note_id: Any) -> bool:
     validated_user_id = _validate_user_id(user_id)
     validated_note_id = _validate_note_id(note_id)
-    collection = get_notes_collection()
-    note_filter = {"_id": validated_note_id, "user_id": validated_user_id}
+    try:
+        collection = get_notes_collection()
+        note_filter = {"_id": validated_note_id, "user_id": validated_user_id}
 
-    if collection.find_one(note_filter) is None:
-        raise NoteNotFoundError(f"Note not found for this user: {validated_note_id}")
+        if collection.find_one(note_filter) is None:
+            raise NoteNotFoundError(f"Note not found for this user: {validated_note_id}")
 
-    collection.delete_one(note_filter)
-    return True
+        collection.delete_one(note_filter)
+        return True
+    except EXPECTED_APPLICATION_ERRORS:
+        raise
+    except Exception as error:
+        raise _wrap_database_error("Deleting note", error) from error
 
 
 def update_note(user_id: Any, note_id: Any, text: Any) -> dict[str, Any]:
     validated_user_id = _validate_user_id(user_id)
     validated_note_id = _validate_note_id(note_id)
     validated_text = _validate_note_text(text)
-    collection = get_notes_collection()
-    note_filter = {"_id": validated_note_id, "user_id": validated_user_id}
+    try:
+        collection = get_notes_collection()
+        note_filter = {"_id": validated_note_id, "user_id": validated_user_id}
 
-    if collection.find_one(note_filter) is None:
-        raise NoteNotFoundError(f"Note not found for this user: {validated_note_id}")
+        if collection.find_one(note_filter) is None:
+            raise NoteNotFoundError(f"Note not found for this user: {validated_note_id}")
 
-    collection.update_one(
-        note_filter,
-        {"$set": {"text": validated_text, "$vectorize": validated_text}},
-        upsert=False,
-    )
+        collection.update_one(
+            note_filter,
+            {"$set": {"text": validated_text, "$vectorize": validated_text}},
+            upsert=False,
+        )
 
-    updated = collection.find_one(note_filter)
-    normalized = _normalize_document(updated)
-    if normalized is None:
-        raise NoteNotFoundError(f"Note not found after update: {validated_note_id}")
-    return normalized
+        updated = collection.find_one(note_filter)
+        normalized = _normalize_document(updated)
+        if normalized is None:
+            raise NoteNotFoundError(f"Note not found after update: {validated_note_id}")
+        return normalized
+    except EXPECTED_APPLICATION_ERRORS:
+        raise
+    except Exception as error:
+        raise _wrap_database_error("Updating note", error) from error
