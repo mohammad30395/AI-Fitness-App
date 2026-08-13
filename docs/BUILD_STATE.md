@@ -85,3 +85,48 @@ Virtual environments detected:
 - No Langflow flows created.
 - No Astra DB collections created.
 - No credentials created, modified, read, or printed.
+
+## Environment Bootstrap
+
+Bootstrap date/time:
+
+- 2026-08-13 12:05:24 +06 +0600
+
+Virtual environment:
+
+- Path: .venv/
+- Created with: /opt/homebrew/opt/python@3.11/bin/python3.11 -m venv .venv
+- Runtime Python: Python 3.11.15
+- pip upgraded inside .venv to: pip 26.2.1
+
+Dependency files:
+
+- requirements.txt contains application dependencies only: streamlit, astrapy, python-dotenv, requests
+- requirements-dev.txt contains: pytest
+
+Langflow decision:
+
+- Langflow was not installed into .venv by default. This application architecture uses Streamlit for the app runtime and Langflow for AI orchestration, which may run in a separate local environment or in the cloud.
+
+Direct installed package versions:
+
+- streamlit==1.61.1
+- astrapy==2.3.1
+- python-dotenv==1.2.2
+- requests==2.34.2
+- pytest==9.1.1
+
+Verification results:
+
+- .venv/bin/python --version: Python 3.11.15
+- .venv/bin/python -m pip check: No broken requirements found.
+- Import smoke test: streamlit, astrapy, dotenv, and requests imported successfully.
+
+Environment bootstrap guardrails:
+
+- No LLM provider SDK was added as a direct application dependency.
+- Langflow was not installed into .venv.
+- No application logic created.
+- No Astra DB collections created.
+- No Langflow flows created.
+- No credentials invented, created, modified, read, or printed.
