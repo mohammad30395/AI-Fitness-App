@@ -57,6 +57,40 @@ def test_get_database_uses_config_and_optional_keyspace(monkeypatch):
     ]
 
 
+@pytest.mark.parametrize(
+    ("values", "missing_name"),
+    [
+        (
+            {
+                "ASTRA_DB_API_ENDPOINT": "",
+                "ASTRA_DB_APPLICATION_TOKEN": "AstraCS:super-secret-token",
+            },
+            "ASTRA_DB_API_ENDPOINT",
+        ),
+        (
+            {
+                "ASTRA_DB_API_ENDPOINT": "https://example-region.apps.astra.datastax.com",
+                "ASTRA_DB_APPLICATION_TOKEN": "",
+            },
+            "ASTRA_DB_APPLICATION_TOKEN",
+        ),
+    ],
+)
+def test_get_database_rejects_missing_required_configuration(monkeypatch, values, missing_name):
+    monkeypatch.setattr(db.config, "get_env_value", lambda name: values.get(name, ""))
+
+    class FakeClient:
+        def __init__(self, token):
+            raise AssertionError("DataAPIClient must not be created with missing config")
+
+    monkeypatch.setattr(db, "DataAPIClient", FakeClient)
+
+    with pytest.raises(db.ConfigurationError) as exc_info:
+        db.get_database()
+
+    assert missing_name in str(exc_info.value)
+
+
 def test_get_database_wraps_connection_error_without_token(monkeypatch):
     values = patch_config(monkeypatch)
 

@@ -115,8 +115,8 @@ def test_run_flow_success_posts_current_langflow_contract(monkeypatch):
     ]
 
 
-@pytest.mark.parametrize("status_code", [401, 403])
-def test_run_flow_auth_errors_call_raise_for_status(monkeypatch, status_code):
+@pytest.mark.parametrize("status_code", [401, 403, 404, 500])
+def test_run_flow_http_errors_call_raise_for_status(monkeypatch, status_code):
     patch_langflow_config(monkeypatch)
     http_error = requests.HTTPError(f"{status_code} Client Error")
 
