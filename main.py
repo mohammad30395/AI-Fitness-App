@@ -103,7 +103,7 @@ def _profile_label(profile_id) -> str:
     for profile in st.session_state.get("profiles", []):
         if str(profile.get("_id")) == str(profile_id):
             name = profile.get("name") or "Unnamed profile"
-            return f"{name} ({profile_id})"
+            return str(name)
     return str(profile_id)
 
 
@@ -192,33 +192,40 @@ def _render_profile_form(*, mode: str, profile: dict | None = None) -> None:
 
     with st.form(form_key):
         name = st.text_input("Name", value=defaults["name"], key=f"{form_key}_name")
-        age = st.number_input(
-            "Age",
-            min_value=1,
-            step=1,
-            value=defaults["age"],
-            key=f"{form_key}_age",
-        )
-        weight = st.number_input(
-            "Weight",
-            min_value=0.1,
-            step=0.1,
-            value=defaults["weight"],
-            key=f"{form_key}_weight",
-        )
-        height = st.number_input(
-            "Height",
-            min_value=0.1,
-            step=0.1,
-            value=defaults["height"],
-            key=f"{form_key}_height",
-        )
-        gender = st.text_input("Gender", value=defaults["gender"], key=f"{form_key}_gender")
-        activity_level = st.text_input(
-            "Activity level",
-            value=defaults["activity_level"],
-            key=f"{form_key}_activity_level",
-        )
+        age_col, weight_col, height_col = st.columns(3)
+        with age_col:
+            age = st.number_input(
+                "Age",
+                min_value=1,
+                step=1,
+                value=defaults["age"],
+                key=f"{form_key}_age",
+            )
+        with weight_col:
+            weight = st.number_input(
+                "Weight",
+                min_value=0.1,
+                step=0.1,
+                value=defaults["weight"],
+                key=f"{form_key}_weight",
+            )
+        with height_col:
+            height = st.number_input(
+                "Height",
+                min_value=0.1,
+                step=0.1,
+                value=defaults["height"],
+                key=f"{form_key}_height",
+            )
+        gender_col, activity_col = st.columns(2)
+        with gender_col:
+            gender = st.text_input("Gender", value=defaults["gender"], key=f"{form_key}_gender")
+        with activity_col:
+            activity_level = st.text_input(
+                "Activity level",
+                value=defaults["activity_level"],
+                key=f"{form_key}_activity_level",
+            )
         goals_text = st.text_area(
             "Goals",
             value=defaults["goals"],
@@ -226,7 +233,7 @@ def _render_profile_form(*, mode: str, profile: dict | None = None) -> None:
             key=f"{form_key}_goals",
         )
 
-        submitted = st.form_submit_button(submit_label)
+        submitted = st.form_submit_button(submit_label, type="primary")
 
     if not submitted:
         return
@@ -267,12 +274,17 @@ def _render_profile_form(*, mode: str, profile: dict | None = None) -> None:
 def render_profile_section() -> None:
     st.header("Profile")
     with st.container(border=True):
+        st.caption("Create or select the active profile used by every section below.")
         if not st.session_state.get("profiles") and st.session_state.get("ui_error") is None:
-            _refresh_profiles()
+            with st.spinner("Loading profiles..."):
+                _refresh_profiles()
 
-        if st.button("Refresh profiles"):
-            _refresh_profiles()
-            st.rerun()
+        refresh_col, selector_col = st.columns((1, 3))
+        with refresh_col:
+            if st.button("Refresh", use_container_width=True):
+                with st.spinner("Loading profiles..."):
+                    _refresh_profiles()
+                st.rerun()
 
         profile_list = st.session_state.get("profiles", [])
         profile_ids = [profile.get("_id") for profile in profile_list if profile.get("_id")]
@@ -285,12 +297,13 @@ def render_profile_section() -> None:
                     current_index = index
                     break
 
-            selected_id = st.selectbox(
-                "Select existing profile",
-                options=profile_ids,
-                index=current_index,
-                format_func=_profile_label,
-            )
+            with selector_col:
+                selected_id = st.selectbox(
+                    "Active profile",
+                    options=profile_ids,
+                    index=current_index,
+                    format_func=_profile_label,
+                )
 
             if str(selected_id) != str(st.session_state.get("selected_profile_id")):
                 try:
@@ -303,13 +316,21 @@ def render_profile_section() -> None:
                     st.session_state["ui_error"] = _safe_profile_error("Selecting profile", error)
                     st.rerun()
         else:
-            st.info("No profiles found yet. Create one below.")
+            with selector_col:
+                st.info("No profiles yet. Create one below to unlock nutrition, notes, and Ask AI.")
 
         selected_profile = st.session_state.get("selected_profile")
         if selected_profile:
-            st.caption(f"Selected profile ID: {selected_profile.get('_id')}")
+            profile_id = selected_profile.get("_id")
+            goals = selected_profile.get("goals") or []
+            summary_cols = st.columns(3)
+            summary_cols[0].caption(f"Profile ID: {profile_id}")
+            summary_cols[1].caption(
+                f"Activity: {selected_profile.get('activity_level') or 'not set'}"
+            )
+            summary_cols[2].caption(f"Goals: {len(goals) if isinstance(goals, list) else 0}")
 
-        create_tab, edit_tab = st.tabs(["Create", "Edit selected"])
+        create_tab, edit_tab = st.tabs(["Create profile", "Edit selected"])
         with create_tab:
             _render_profile_form(mode="create")
 
@@ -317,7 +338,7 @@ def render_profile_section() -> None:
             if selected_profile:
                 _render_profile_form(mode="edit", profile=selected_profile)
             else:
-                st.write("Select or create a profile before editing.")
+                st.info("Select or create a profile before editing.")
 
 
 def render_nutrition_section() -> None:
@@ -326,6 +347,14 @@ def render_nutrition_section() -> None:
         selected_profile = st.session_state.get("selected_profile")
         if not selected_profile:
             st.info("Select or create a profile before generating nutrition targets.")
+            st.button("Generate with AI", disabled=True, use_container_width=True)
+            with st.form("nutrition_disabled_form"):
+                disabled_cols = st.columns(4)
+                disabled_cols[0].number_input("Calories (kcal/day)", value=0.0, disabled=True)
+                disabled_cols[1].number_input("Protein (g/day)", value=0.0, disabled=True)
+                disabled_cols[2].number_input("Fat (g/day)", value=0.0, disabled=True)
+                disabled_cols[3].number_input("Carbs (g/day)", value=0.0, disabled=True)
+                st.form_submit_button("Save / Apply nutrition", disabled=True)
             return
 
         st.caption("Generated targets are approximate general fitness guidance.")
@@ -339,14 +368,14 @@ def render_nutrition_section() -> None:
             fat.metric("Fat", f"{nutrition.get('fat', '-')} g/day")
             carbs.metric("Carbs", f"{nutrition.get('carbs', '-')} g/day")
         else:
-            st.write("No nutrition targets are saved for this profile yet.")
+            st.info("No saved nutrition targets yet. Generate a draft or enter targets manually.")
 
         if st.session_state.get("macro_success"):
             st.success(st.session_state["macro_success"])
         if st.session_state.get("macro_error"):
             st.error(st.session_state["macro_error"])
 
-        if st.button("Generate with AI"):
+        if st.button("Generate with AI", type="primary", use_container_width=True):
             try:
                 profile_context = profiles.build_profile_context(selected_profile)
                 goals = _goals_to_text(selected_profile).strip() or "No specific goals provided."
@@ -378,35 +407,40 @@ def render_nutrition_section() -> None:
 
         st.subheader("Review and save")
         with st.form(form_key):
-            calories = st.number_input(
-                "Calories (kcal/day)",
-                min_value=500.0,
-                max_value=10000.0,
-                step=50.0,
-                value=float(defaults.get("calories", 2000)),
-            )
-            protein = st.number_input(
-                "Protein (g/day)",
-                min_value=1.0,
-                max_value=500.0,
-                step=5.0,
-                value=float(defaults.get("protein", 120)),
-            )
-            fat = st.number_input(
-                "Fat (g/day)",
-                min_value=1.0,
-                max_value=400.0,
-                step=5.0,
-                value=float(defaults.get("fat", 70)),
-            )
-            carbs = st.number_input(
-                "Carbs (g/day)",
-                min_value=1.0,
-                max_value=1000.0,
-                step=5.0,
-                value=float(defaults.get("carbs", 250)),
-            )
-            submitted = st.form_submit_button("Save / Apply nutrition")
+            nutrition_cols = st.columns(4)
+            with nutrition_cols[0]:
+                calories = st.number_input(
+                    "Calories (kcal/day)",
+                    min_value=500.0,
+                    max_value=10000.0,
+                    step=50.0,
+                    value=float(defaults.get("calories", 2000)),
+                )
+            with nutrition_cols[1]:
+                protein = st.number_input(
+                    "Protein (g/day)",
+                    min_value=1.0,
+                    max_value=500.0,
+                    step=5.0,
+                    value=float(defaults.get("protein", 120)),
+                )
+            with nutrition_cols[2]:
+                fat = st.number_input(
+                    "Fat (g/day)",
+                    min_value=1.0,
+                    max_value=400.0,
+                    step=5.0,
+                    value=float(defaults.get("fat", 70)),
+                )
+            with nutrition_cols[3]:
+                carbs = st.number_input(
+                    "Carbs (g/day)",
+                    min_value=1.0,
+                    max_value=1000.0,
+                    step=5.0,
+                    value=float(defaults.get("carbs", 250)),
+                )
+            submitted = st.form_submit_button("Save / Apply nutrition", type="primary")
 
         if not submitted:
             return
@@ -440,6 +474,9 @@ def render_notes_section() -> None:
         selected_profile = st.session_state.get("selected_profile")
         if not selected_profile:
             st.info("Select or create a profile before adding notes.")
+            with st.form("add_note_disabled_form"):
+                st.text_area("Workout / fitness note", height=100, disabled=True)
+                st.form_submit_button("Add Note", disabled=True)
             return
 
         user_id = str(selected_profile.get("_id") or "").strip()
@@ -447,10 +484,11 @@ def render_notes_section() -> None:
             st.error("Selected profile is missing an ID.")
             return
 
-        st.caption("Notes are saved only for the selected profile.")
+        st.caption("Notes are saved and listed only for the selected profile.")
 
         if str(st.session_state.get("notes_profile_id")) != user_id:
-            _refresh_notes(user_id)
+            with st.spinner("Loading notes..."):
+                _refresh_notes(user_id)
 
         if st.session_state.get("notes_success"):
             st.success(st.session_state["notes_success"])
@@ -463,7 +501,7 @@ def render_notes_section() -> None:
                 placeholder="Example: Felt strong during squats today.",
                 height=120,
             )
-            submitted = st.form_submit_button("Add Note")
+            submitted = st.form_submit_button("Add Note", type="primary")
 
         if submitted:
             try:
@@ -478,23 +516,29 @@ def render_notes_section() -> None:
                 st.session_state["notes_error"] = _safe_notes_error("Adding note", error)
                 st.rerun()
 
-        if st.button("Refresh notes"):
-            _refresh_notes(user_id)
-            st.rerun()
-
         notes = st.session_state.get("notes") or []
+        list_col, refresh_col = st.columns((3, 1))
+        list_col.subheader(f"Saved notes ({len(notes)})")
+        with refresh_col:
+            if st.button("Refresh notes", use_container_width=True):
+                with st.spinner("Loading notes..."):
+                    _refresh_notes(user_id)
+                st.rerun()
+
         if not notes:
-            st.write("No notes saved for this profile yet.")
+            st.info("No notes saved for this profile yet.")
             return
 
-        st.subheader("Saved notes")
         for index, note in enumerate(notes, start=1):
             note_id = note.get("_id")
             note_key = str(note_id)
             note_text = str(note.get("text") or "")
 
             with st.container(border=True):
-                st.markdown(note_text)
+                note_col, action_col = st.columns((4, 1))
+                with note_col:
+                    st.caption(f"Note {index}")
+                    st.write(note_text)
 
                 if st.session_state.get("confirm_delete_note_id") == note_key:
                     st.warning("Confirm deletion for this note.")
@@ -520,9 +564,11 @@ def render_notes_section() -> None:
                         if st.button("Cancel", key=f"cancel_delete_note_{note_key}"):
                             st.session_state["confirm_delete_note_id"] = None
                             st.rerun()
-                elif st.button("Delete note", key=f"delete_note_{index}_{note_key}"):
-                    st.session_state["confirm_delete_note_id"] = note_key
-                    st.rerun()
+                else:
+                    with action_col:
+                        if st.button("Delete", key=f"delete_note_{index}_{note_key}"):
+                            st.session_state["confirm_delete_note_id"] = note_key
+                            st.rerun()
 
 
 def render_ask_ai_section() -> None:
@@ -531,6 +577,9 @@ def render_ask_ai_section() -> None:
         selected_profile = st.session_state.get("selected_profile")
         if not selected_profile:
             st.info("Select or create a profile before asking AI.")
+            with st.form("ask_ai_disabled_form"):
+                st.text_area("Question", height=90, disabled=True)
+                st.form_submit_button("Ask AI", disabled=True)
             return
 
         user_id = str(selected_profile.get("_id") or "").strip()
@@ -553,7 +602,7 @@ def render_ask_ai_section() -> None:
                 placeholder="Example: Based on my notes, how should I structure next week?",
                 height=100,
             )
-            submitted = st.form_submit_button("Ask AI")
+            submitted = st.form_submit_button("Ask AI", type="primary")
 
         if submitted:
             if not question.strip():
@@ -576,7 +625,8 @@ def render_ask_ai_section() -> None:
         last_answer = st.session_state.get("last_ai_answer")
         if last_answer:
             st.subheader("Last answer")
-            st.markdown(last_answer)
+            with st.container(border=True):
+                st.markdown(last_answer)
 
 
 def main() -> None:
@@ -591,6 +641,7 @@ def main() -> None:
         "This app provides general fitness information for planning and learning. "
         "It is not medical advice."
     )
+    st.divider()
 
     if st.session_state.get("profile_success"):
         st.success(st.session_state["profile_success"])
