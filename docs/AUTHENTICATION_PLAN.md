@@ -148,6 +148,11 @@ Account document concept:
 }
 ```
 
+AUTH-01 confirmation: this is the planned application-level document shape for the
+normal non-vector `accounts` collection. The setup script only creates or reuses
+the collection; it does not insert sample accounts, example passwords, or password
+hashes.
+
 Rules:
 
 - `_id` is the normalized username so duplicate usernames are naturally rejected.
@@ -155,7 +160,8 @@ Rules:
 - Usernames are not used as ownership identifiers.
 - Plaintext passwords are never stored.
 - `password_hash` is never sent to Streamlit UI, Langflow, OpenRouter, logs, profile context, or model prompts.
-- Password verification should use Argon2id through a maintained Python package such as `argon2-cffi`, added in a later implementation milestone.
+- Password verification should use Argon2id through `argon2-cffi`.
+- Account creation will generate `account_id` independently with a cryptographically suitable random UUID such as `uuid.uuid4()`.
 
 ## Ownership Model
 

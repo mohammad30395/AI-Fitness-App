@@ -733,3 +733,35 @@ Known limitations:
 - Fitness output is general guidance, not medical diagnosis or clinical nutrition advice.
 - Public deployment requires a reachable hosted Langflow service; a local `127.0.0.1` Langflow URL is only valid for local development.
 - OpenRouter remains inside Langflow; Streamlit does not call OpenRouter directly.
+
+## AUTH-01 Account Storage Foundation
+
+Date/time:
+
+- 2026-08-26 20:07:06 +0600
+
+Status:
+
+- PASS
+
+Results:
+
+- `ASTRA_ACCOUNTS_COLLECTION` is configured with default `accounts`.
+- `argon2-cffi` is present as an application dependency and importable; planned password hashes use Argon2id.
+- `scripts/setup_accounts_collection.py` created the `accounts` collection on the first live run.
+- A second live run safely reused the existing `accounts` collection.
+- No account documents, example passwords, or password hashes were inserted.
+- Existing profile, note, Langflow, Ask AI, and Streamlit behavior was not changed in this milestone.
+
+Verification commands:
+
+- `.venv/bin/python -m pytest -q`: PASS, 115 tests passed.
+- `.venv/bin/python -m compileall -q -x '^\\./\\.venv(/|$)' .`: PASS.
+- `.venv/bin/python -m pip check`: PASS, no broken requirements found.
+- `rg '^argon2-cffi' requirements.txt && .venv/bin/python -c 'import argon2; print("argon2 import ok")'`: PASS.
+- `.venv/bin/python scripts/setup_accounts_collection.py`: PASS, action `created`.
+- `.venv/bin/python scripts/setup_accounts_collection.py`: PASS, action `reused`.
+
+Next milestone:
+
+- AUTH-02 registration/authentication logic.
