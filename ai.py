@@ -254,7 +254,8 @@ def get_macros(profile_context: str, goals: str) -> dict[str, int | float]:
 def ask_ai(
     question: str,
     profile_context: str,
-    user_id: str,
+    account_id: str,
+    profile_id: str,
     session_id: str | None = None,
 ) -> str:
     """Run Ask AI V2 through Langflow and return the final plain-text answer."""
@@ -262,8 +263,7 @@ def ask_ai(
         raise ValueError("question must be a non-empty string.")
     if not isinstance(profile_context, str) or not profile_context.strip():
         raise ValueError("profile_context must be a non-empty string.")
-    if not isinstance(user_id, str) or not user_id.strip():
-        raise ValueError("user_id must be a non-empty string.")
+    search_filter = build_ask_ai_search_filter(account_id, profile_id)
 
     flow_id = _require_config_value("ASK_AI_FLOW_ID")
     profile_component_id = _require_config_value("ASK_PROFILE_COMPONENT_ID")
@@ -280,7 +280,7 @@ def ask_ai(
                 "profile": profile_context,
             },
             user_id_component_id: {
-                "advanced_search_filter": json.dumps({"user_id": user_id.strip()}),
+                "advanced_search_filter": json.dumps(search_filter),
             },
         },
     )

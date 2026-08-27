@@ -1,3 +1,5 @@
+import json
+
 import pytest
 import requests
 
@@ -306,6 +308,7 @@ def test_ask_ai_uses_configured_flow_and_runtime_tweaks(monkeypatch):
     result = ai.ask_ai(
         " Based on my notes, what should I do next week? ",
         "Profile id: profile-1\nActivity level: moderate",
+        "account-1",
         "profile-1",
         session_id="session-ask",
     )
@@ -324,12 +327,112 @@ def test_ask_ai_uses_configured_flow_and_runtime_tweaks(monkeypatch):
                         "profile": "Profile id: profile-1\nActivity level: moderate",
                     },
                     "ext:datastax:AstraDBVectorStoreComponent@official-2VBhC": {
-                        "advanced_search_filter": '{"user_id": "profile-1"}',
+                        "advanced_search_filter": (
+                            '{"owner_account_id": "account-1", "user_id": "profile-1"}'
+                        ),
                     },
                 },
             },
         )
     ]
+
+
+@pytest.mark.parametrize(
+    ("account_id", "profile_id", "expected_filter"),
+    [
+        (
+            "account-a",
+            "profile-a",
+            {"owner_account_id": "account-a", "user_id": "profile-a"},
+        ),
+        (
+            "account-b",
+            "profile-b",
+            {"owner_account_id": "account-b", "user_id": "profile-b"},
+        ),
+    ],
+)
+def test_ask_ai_sends_compound_rag_filter_for_account_profile_pairings(
+    monkeypatch,
+    account_id,
+    profile_id,
+    expected_filter,
+):
+    patch_ask_ai_config(monkeypatch)
+    calls = []
+
+    def fake_run_flow(flow_id, input_value, **kwargs):
+        calls.append(kwargs)
+        return "Answer"
+
+    monkeypatch.setattr(ai, "run_flow", fake_run_flow)
+
+    ai.ask_ai("What should I do next week?", "profile context", account_id, profile_id)
+
+    tweaks = calls[0]["tweaks"]
+    astra_tweak = tweaks["ext:datastax:AstraDBVectorStoreComponent@official-2VBhC"]
+    emitted_filter = json.loads(astra_tweak["advanced_search_filter"])
+    assert emitted_filter == expected_filter
+    assert set(emitted_filter) == {"owner_account_id", "user_id"}
+
+
+def test_ask_ai_does_not_emit_old_profile_only_filter(monkeypatch):
+    patch_ask_ai_config(monkeypatch)
+    calls = []
+
+    def fake_run_flow(flow_id, input_value, **kwargs):
+        calls.append(kwargs)
+        return "Answer"
+
+    monkeypatch.setattr(ai, "run_flow", fake_run_flow)
+
+    ai.ask_ai("What should I do next week?", "profile context", "account-1", "profile-1")
+
+    astra_tweak = calls[0]["tweaks"]["ext:datastax:AstraDBVectorStoreComponent@official-2VBhC"]
+    emitted_filter = json.loads(astra_tweak["advanced_search_filter"])
+    assert emitted_filter != {"user_id": "profile-1"}
+    assert emitted_filter == {"owner_account_id": "account-1", "user_id": "profile-1"}
+
+
+def test_ask_ai_keeps_account_id_out_of_profile_context(monkeypatch):
+    patch_ask_ai_config(monkeypatch)
+    calls = []
+
+    def fake_run_flow(flow_id, input_value, **kwargs):
+        calls.append(kwargs)
+        return "Answer"
+
+    monkeypatch.setattr(ai, "run_flow", fake_run_flow)
+
+    ai.ask_ai(
+        "What should I do next week?",
+        "Profile id: profile-1\nActivity level: moderate",
+        "account-secret-id",
+        "profile-1",
+    )
+
+    profile_tweak = calls[0]["tweaks"]["Prompt Template-GtOCM"]
+    assert profile_tweak == {"profile": "Profile id: profile-1\nActivity level: moderate"}
+    assert "account-secret-id" not in profile_tweak["profile"]
+
+
+def test_ask_ai_does_not_generate_password_filter_fields(monkeypatch):
+    patch_ask_ai_config(monkeypatch)
+    calls = []
+
+    def fake_run_flow(flow_id, input_value, **kwargs):
+        calls.append(kwargs)
+        return "Answer"
+
+    monkeypatch.setattr(ai, "run_flow", fake_run_flow)
+
+    ai.ask_ai("What should I do next week?", "profile context", "account-1", "profile-1")
+
+    serialized_filter = calls[0]["tweaks"][
+        "ext:datastax:AstraDBVectorStoreComponent@official-2VBhC"
+    ]["advanced_search_filter"]
+    assert "password" not in serialized_filter
+    assert "password_hash" not in serialized_filter
 
 
 def test_build_ask_ai_search_filter_returns_compound_ownership_filter():
@@ -391,23 +494,35 @@ def test_ask_ai_rejects_blank_questions(monkeypatch, question):
     patch_ask_ai_config(monkeypatch)
 
     with pytest.raises(ValueError, match="question"):
-        ai.ask_ai(question, "profile context", "profile-1")
+        ai.ask_ai(question, "profile context", "account-1", "profile-1")
 
 
 @pytest.mark.parametrize(
-    ("profile_context", "user_id", "match"),
+    ("profile_context", "account_id", "profile_id", "match"),
     [
-        ("", "profile-1", "profile_context"),
-        ("profile context", "", "user_id"),
-        (None, "profile-1", "profile_context"),
-        ("profile context", None, "user_id"),
+        ("", "account-1", "profile-1", "profile_context"),
+        (None, "account-1", "profile-1", "profile_context"),
+        ("profile context", "", "profile-1", "account_id"),
+        ("profile context", "   ", "profile-1", "account_id"),
+        ("profile context", None, "profile-1", "account_id"),
+        ("profile context", 123, "profile-1", "account_id"),
+        ("profile context", "account-1", "", "profile_id"),
+        ("profile context", "account-1", "   ", "profile_id"),
+        ("profile context", "account-1", None, "profile_id"),
+        ("profile context", "account-1", 123, "profile_id"),
     ],
 )
-def test_ask_ai_rejects_blank_runtime_context(monkeypatch, profile_context, user_id, match):
+def test_ask_ai_rejects_invalid_runtime_context(
+    monkeypatch,
+    profile_context,
+    account_id,
+    profile_id,
+    match,
+):
     patch_ask_ai_config(monkeypatch)
 
     with pytest.raises(ValueError, match=match):
-        ai.ask_ai("What should I do next week?", profile_context, user_id)
+        ai.ask_ai("What should I do next week?", profile_context, account_id, profile_id)
 
 
 @pytest.mark.parametrize(
@@ -434,7 +549,7 @@ def test_ask_ai_rejects_missing_configuration(monkeypatch, values):
     monkeypatch.setattr(ai.config, "get_env_value", lambda name: values.get(name, ""))
 
     with pytest.raises(ai.LangflowConfigError) as exc_info:
-        ai.ask_ai("What should I do next week?", "profile context", "profile-1")
+        ai.ask_ai("What should I do next week?", "profile context", "account-1", "profile-1")
 
     assert "Missing required environment variable" in str(exc_info.value)
 
@@ -448,7 +563,7 @@ def test_ask_ai_propagates_langflow_errors_without_secrets(monkeypatch):
     monkeypatch.setattr(ai, "run_flow", fake_run_flow)
 
     with pytest.raises(ai.LangflowResponseError) as exc_info:
-        ai.ask_ai("What should I do next week?", "profile context", "profile-1")
+        ai.ask_ai("What should I do next week?", "profile context", "account-1", "profile-1")
 
     assert "top-level keys" in str(exc_info.value)
     assert "secret" not in str(exc_info.value).lower()
