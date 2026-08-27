@@ -34,6 +34,7 @@ class FakeDuplicateAccountError(RuntimeError):
 class FakeAccountsCollection:
     def __init__(self):
         self.documents = []
+        self.find_filters = []
 
     def insert_one(self, document):
         if any(existing["_id"] == document["_id"] for existing in self.documents):
@@ -42,6 +43,15 @@ class FakeAccountsCollection:
             )
         self.documents.append(dict(document))
         return object()
+
+    def find_one(self, filter_doc):
+        self.find_filters.append(dict(filter_doc))
+        if set(filter_doc) != {"_id"}:
+            raise AssertionError("authentication must query by normalized _id only")
+        for document in self.documents:
+            if document["_id"] == filter_doc["_id"]:
+                return dict(document)
+        return None
 
 
 def patch_accounts_collection(monkeypatch, collection):
@@ -194,6 +204,114 @@ def test_create_account_sanitizes_database_exception(monkeypatch):
 
     message = str(exc_info.value)
     assert "Creating account failed (RuntimeError)." == message
+    assert secret not in message
+    assert VALID_PASSWORD not in message
+    assert "argon2" not in message
+
+
+def test_authenticate_valid_username_password_returns_safe_account(monkeypatch):
+    collection = FakeAccountsCollection()
+    patch_accounts_collection(monkeypatch, collection)
+    created = auth.create_account("login-user", VALID_PASSWORD)
+
+    result = auth.authenticate("login-user", VALID_PASSWORD)
+
+    assert result == {
+        "account_id": created["account_id"],
+        "username": "login-user",
+    }
+    assert "password_hash" not in result
+    assert "password" not in result
+    assert collection.find_filters == [{"_id": "login-user"}]
+
+
+def test_authenticate_case_insensitive_username_login_works(monkeypatch):
+    collection = FakeAccountsCollection()
+    patch_accounts_collection(monkeypatch, collection)
+    created = auth.create_account("Mixed-Case-User", VALID_PASSWORD)
+
+    result = auth.authenticate("  mixed-case-user  ", VALID_PASSWORD)
+
+    assert result["account_id"] == created["account_id"]
+    assert result["username"] == "Mixed-Case-User"
+    assert collection.find_filters == [{"_id": "mixed-case-user"}]
+
+
+def test_authenticate_wrong_password_and_missing_username_fail_generically(monkeypatch):
+    collection = FakeAccountsCollection()
+    patch_accounts_collection(monkeypatch, collection)
+    auth.create_account("known-user", VALID_PASSWORD)
+
+    with pytest.raises(auth.AuthenticationError) as wrong_password:
+        auth.authenticate("known-user", "wrong horse battery staple")
+    with pytest.raises(auth.AuthenticationError) as missing_username:
+        auth.authenticate("missing-user", VALID_PASSWORD)
+
+    assert str(wrong_password.value) == "Invalid username or password."
+    assert str(missing_username.value) == "Invalid username or password."
+    assert str(wrong_password.value) == str(missing_username.value)
+    assert VALID_PASSWORD not in str(missing_username.value)
+    assert "wrong horse battery staple" not in str(wrong_password.value)
+    assert "password_hash" not in str(wrong_password.value)
+
+
+def test_authenticate_malformed_account_document_fails_safely(monkeypatch):
+    class MalformedAccountsCollection:
+        def find_one(self, filter_doc):
+            return {
+                "_id": "broken-user",
+                "username": "broken-user",
+                "password_hash": auth.hash_password(VALID_PASSWORD),
+            }
+
+    patch_accounts_collection(monkeypatch, MalformedAccountsCollection())
+
+    with pytest.raises(auth.AccountStorageError) as exc_info:
+        auth.authenticate("broken-user", VALID_PASSWORD)
+
+    message = str(exc_info.value)
+    assert message == "Stored account record is malformed."
+    assert VALID_PASSWORD not in message
+    assert "password_hash" not in message
+
+
+def test_authenticate_stored_invalid_password_hash_fails_safely(monkeypatch):
+    class InvalidHashAccountsCollection:
+        def find_one(self, filter_doc):
+            return {
+                "_id": "invalid-hash-user",
+                "account_id": "account-1",
+                "username": "invalid-hash-user",
+                "password_hash": "not-an-argon2-hash",
+            }
+
+    patch_accounts_collection(monkeypatch, InvalidHashAccountsCollection())
+
+    with pytest.raises(auth.AuthenticationError) as exc_info:
+        auth.authenticate("invalid-hash-user", VALID_PASSWORD)
+
+    message = str(exc_info.value)
+    assert message == "Invalid username or password."
+    assert VALID_PASSWORD not in message
+    assert "not-an-argon2-hash" not in message
+
+
+def test_authenticate_sanitizes_database_exception(monkeypatch):
+    secret = "AstraCS:super-secret-token"
+
+    class FailingAccountsCollection:
+        def find_one(self, filter_doc):
+            raise RuntimeError(
+                f"read failed token={secret} password={VALID_PASSWORD} hash=$argon2id$secret"
+            )
+
+    patch_accounts_collection(monkeypatch, FailingAccountsCollection())
+
+    with pytest.raises(auth.AccountStorageError) as exc_info:
+        auth.authenticate("new-user", VALID_PASSWORD)
+
+    message = str(exc_info.value)
+    assert message == "Authenticating account failed (RuntimeError)."
     assert secret not in message
     assert VALID_PASSWORD not in message
     assert "argon2" not in message

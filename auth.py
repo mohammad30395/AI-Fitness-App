@@ -49,6 +49,10 @@ class AccountStorageError(RuntimeError):
     """Raised when account persistence fails."""
 
 
+class AuthenticationError(RuntimeError):
+    """Raised when username/password authentication fails."""
+
+
 def normalize_username(username: str) -> str:
     """Return the deterministic normalized username."""
     if not isinstance(username, str):
@@ -143,6 +147,45 @@ def create_account(username: str, password: str) -> dict[str, str]:
         if _is_duplicate_account_error(error):
             raise AccountAlreadyExistsError("Username is already registered.") from error
         raise AccountStorageError(f"Creating account failed ({type(error).__name__}).") from error
+
+    return {
+        "account_id": account_id,
+        "username": display_username,
+    }
+
+
+def authenticate(username: str, password: str) -> dict[str, str]:
+    """Authenticate a username/password pair and return only safe account fields."""
+    failure_message = "Invalid username or password."
+    try:
+        normalized_username = validate_username(username)
+    except InvalidUsernameError as error:
+        raise AuthenticationError(failure_message) from error
+
+    try:
+        account = db.get_accounts_collection().find_one({"_id": normalized_username})
+    except Exception as error:
+        raise AccountStorageError(f"Authenticating account failed ({type(error).__name__}).") from error
+
+    if account is None:
+        raise AuthenticationError(failure_message)
+
+    if not isinstance(account, dict):
+        raise AccountStorageError("Stored account record is malformed.")
+
+    password_hash = account.get("password_hash")
+    if not isinstance(password_hash, str) or not password_hash:
+        raise AccountStorageError("Stored account record is malformed.")
+
+    if not verify_password(password, password_hash):
+        raise AuthenticationError(failure_message)
+
+    account_id = account.get("account_id")
+    display_username = account.get("username")
+    if not isinstance(account_id, str) or not account_id.strip():
+        raise AccountStorageError("Stored account record is malformed.")
+    if not isinstance(display_username, str) or not display_username.strip():
+        raise AccountStorageError("Stored account record is malformed.")
 
     return {
         "account_id": account_id,
