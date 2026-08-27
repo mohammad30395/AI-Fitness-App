@@ -376,14 +376,19 @@ def add_note(user_id: Any, text: Any) -> Any:
         raise _wrap_database_error("Adding note", error) from error
 
 
-def list_notes(user_id: Any, limit: int = 50) -> list[dict[str, Any]]:
-    validated_user_id = _validate_user_id(user_id)
+def list_notes(account_id: Any, profile_id: Any, limit: int = 50) -> list[dict[str, Any]]:
+    validated_account_id = _validate_account_id(account_id)
+    validated_profile_id = _validate_user_id(profile_id)
     if not isinstance(limit, int) or isinstance(limit, bool) or limit <= 0:
         raise InvalidNoteError("limit must be a positive integer")
 
     try:
+        get_profile(validated_account_id, validated_profile_id)
         documents = get_notes_collection().find(
-            {"user_id": validated_user_id},
+            {
+                "owner_account_id": validated_account_id,
+                "user_id": validated_profile_id,
+            },
             limit=limit,
         )
         return [_normalize_document(document) for document in documents]

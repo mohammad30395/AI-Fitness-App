@@ -5,6 +5,12 @@ import pytest
 import db
 
 
+ACCOUNT_A = "account-a"
+ACCOUNT_B = "account-b"
+PROFILE_A = "profile-a"
+PROFILE_B = "profile-b"
+
+
 def test_get_notes_collection_uses_configured_collection(monkeypatch):
     values = {"ASTRA_NOTES_COLLECTION": "notes"}
     calls = []
@@ -56,44 +62,125 @@ def test_add_note_rejects_blank_notes_before_database_call(monkeypatch, blank_te
         db.add_note("user-1", blank_text)
 
 
-def test_list_notes_filters_by_user_id_and_limit(monkeypatch):
+def test_list_notes_filters_by_owner_profile_and_limit(monkeypatch):
+    profile_checks = []
     calls = []
+    documents = [
+        {"_id": "note-a", "owner_account_id": ACCOUNT_A, "user_id": PROFILE_A, "text": "A"},
+        {"_id": "note-b", "owner_account_id": ACCOUNT_B, "user_id": PROFILE_B, "text": "B"},
+        {"_id": "legacy-note", "user_id": PROFILE_A, "text": "Legacy"},
+        {"_id": "cross-note", "owner_account_id": ACCOUNT_B, "user_id": PROFILE_A, "text": "Cross"},
+    ]
+
+    def fake_get_profile(account_id, profile_id):
+        profile_checks.append((account_id, profile_id))
+        if (account_id, profile_id) in {
+            (ACCOUNT_A, PROFILE_A),
+            (ACCOUNT_B, PROFILE_B),
+        }:
+            return {"_id": profile_id, "owner_account_id": account_id}
+        raise db.ProfileNotFoundError("Profile not found.")
 
     class FakeCollection:
         def find(self, filter_doc, **kwargs):
-            calls.append((filter_doc, kwargs))
+            calls.append((dict(filter_doc), dict(kwargs)))
+            assert set(filter_doc) == {"owner_account_id", "user_id"}
             return iter(
-                [
-                    {"_id": "note-1", "user_id": "user-1", "text": "A"},
-                    {"_id": "note-2", "user_id": "user-1", "text": "B"},
-                ]
+                document
+                for document in documents
+                if document.get("owner_account_id") == filter_doc["owner_account_id"]
+                and document.get("user_id") == filter_doc["user_id"]
             )
 
+    monkeypatch.setattr(db, "get_profile", fake_get_profile)
     monkeypatch.setattr(db, "get_notes_collection", lambda: FakeCollection())
 
-    notes = db.list_notes("user-1", limit=2)
+    account_a_notes = db.list_notes(ACCOUNT_A, PROFILE_A, limit=2)
+    account_b_notes = db.list_notes(ACCOUNT_B, PROFILE_B, limit=3)
 
-    assert notes == [
-        {"_id": "note-1", "user_id": "user-1", "text": "A"},
-        {"_id": "note-2", "user_id": "user-1", "text": "B"},
+    assert account_a_notes == [
+        {"_id": "note-a", "owner_account_id": ACCOUNT_A, "user_id": PROFILE_A, "text": "A"},
     ]
-    assert calls == [({"user_id": "user-1"}, {"limit": 2})]
+    assert account_b_notes == [
+        {"_id": "note-b", "owner_account_id": ACCOUNT_B, "user_id": PROFILE_B, "text": "B"},
+    ]
+    assert "legacy-note" not in [note["_id"] for note in account_a_notes]
+    assert "cross-note" not in [note["_id"] for note in account_a_notes]
+    assert profile_checks == [(ACCOUNT_A, PROFILE_A), (ACCOUNT_B, PROFILE_B)]
+    assert calls == [
+        ({"owner_account_id": ACCOUNT_A, "user_id": PROFILE_A}, {"limit": 2}),
+        ({"owner_account_id": ACCOUNT_B, "user_id": PROFILE_B}, {"limit": 3}),
+    ]
+
+
+def test_list_notes_rejects_foreign_profile_before_note_query(monkeypatch):
+    calls = []
+
+    def fake_get_profile(account_id, profile_id):
+        calls.append(("get_profile", account_id, profile_id))
+        raise db.ProfileNotFoundError("Profile not found.")
+
+    class FakeCollection:
+        def find(self, filter_doc, **kwargs):
+            raise AssertionError("notes must not be queried for foreign profile")
+
+    monkeypatch.setattr(db, "get_profile", fake_get_profile)
+    monkeypatch.setattr(db, "get_notes_collection", lambda: FakeCollection())
+
+    with pytest.raises(db.ProfileNotFoundError):
+        db.list_notes(ACCOUNT_A, PROFILE_B, limit=10)
+    with pytest.raises(db.ProfileNotFoundError):
+        db.list_notes(ACCOUNT_B, PROFILE_A, limit=10)
+
+    assert calls == [
+        ("get_profile", ACCOUNT_A, PROFILE_B),
+        ("get_profile", ACCOUNT_B, PROFILE_A),
+    ]
 
 
 def test_list_notes_rejects_invalid_limit(monkeypatch):
     with pytest.raises(db.InvalidNoteError):
-        db.list_notes("user-1", limit=0)
+        db.list_notes(ACCOUNT_A, PROFILE_A, limit=0)
 
 
-def test_list_notes_rejects_blank_user_id_before_database_call(monkeypatch):
+@pytest.mark.parametrize("account_id", ["", "   ", None])
+def test_list_notes_rejects_blank_account_id_before_database_call(monkeypatch, account_id):
+    monkeypatch.setattr(
+        db,
+        "get_profile",
+        lambda account_id, profile_id: (_ for _ in ()).throw(
+            AssertionError("profile ownership must not be checked for invalid account_id")
+        ),
+    )
+
     class FakeCollection:
         def find(self, filter_doc, **kwargs):
-            raise AssertionError("database must not be called for invalid user_id")
+            raise AssertionError("database must not be called for invalid account_id")
+
+    monkeypatch.setattr(db, "get_notes_collection", lambda: FakeCollection())
+
+    with pytest.raises(db.InvalidProfileError):
+        db.list_notes(account_id, PROFILE_A, limit=10)
+
+
+@pytest.mark.parametrize("profile_id", ["", "   ", None])
+def test_list_notes_rejects_blank_profile_id_before_database_call(monkeypatch, profile_id):
+    monkeypatch.setattr(
+        db,
+        "get_profile",
+        lambda account_id, profile_id: (_ for _ in ()).throw(
+            AssertionError("profile ownership must not be checked for invalid profile_id")
+        ),
+    )
+
+    class FakeCollection:
+        def find(self, filter_doc, **kwargs):
+            raise AssertionError("database must not be called for invalid profile_id")
 
     monkeypatch.setattr(db, "get_notes_collection", lambda: FakeCollection())
 
     with pytest.raises(db.InvalidNoteError):
-        db.list_notes(" ", limit=10)
+        db.list_notes(ACCOUNT_A, profile_id, limit=10)
 
 
 def test_add_note_wraps_database_error_without_token(monkeypatch):
