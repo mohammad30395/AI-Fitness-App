@@ -39,6 +39,9 @@ class FakeColumn(FakeTab):
     def metric(self, *args, **kwargs):
         return None
 
+    def subheader(self, *args, **kwargs):
+        return None
+
 
 class FakeStreamlit:
     def __init__(self):
@@ -116,6 +119,15 @@ class FakeStreamlit:
             raise AssertionError("private UI must not render before authentication")
 
     def success(self, *args, **kwargs):
+        return None
+
+    def warning(self, *args, **kwargs):
+        return None
+
+    def write(self, *args, **kwargs):
+        return None
+
+    def markdown(self, *args, **kwargs):
         return None
 
     def spinner(self, *args, **kwargs):
@@ -750,6 +762,213 @@ def test_nutrition_save_passes_trusted_account_id(monkeypatch):
             },
         )
     ]
+
+
+def test_note_list_uses_authenticated_account_and_selected_profile(monkeypatch):
+    fake_st = FakeStreamlit()
+    seed_authenticated_session(fake_st, account_id="account-a")
+    monkeypatch.setattr(main, "st", fake_st)
+    calls = []
+
+    def fake_list_notes(account_id, profile_id, limit=50):
+        calls.append((account_id, profile_id, limit))
+        return [{"_id": "note-a", "text": "private"}]
+
+    monkeypatch.setattr(main.db, "list_notes", fake_list_notes)
+
+    assert main._refresh_notes("profile-a") is True
+
+    assert calls == [("account-a", "profile-a", 50)]
+    assert fake_st.session_state["notes_profile_id"] == "profile-a"
+
+
+def test_note_create_uses_authenticated_account_and_selected_profile(monkeypatch):
+    fake_st = FakeStreamlit()
+    fake_st.private_ui_allowed = True
+    fake_st.submit_value = True
+    seed_authenticated_session(fake_st, account_id="account-a")
+    fake_st.session_state["selected_profile"] = {"_id": "profile-a", "goals": []}
+    fake_st.session_state["notes_profile_id"] = "profile-a"
+    fake_st.input_values = {
+        "Workout / fitness note": "synthetic note text",
+        "owner_account_id": "account-b",
+    }
+    monkeypatch.setattr(main, "st", fake_st)
+    calls = []
+    refreshes = []
+
+    def fake_add_note(account_id, profile_id, text):
+        calls.append((account_id, profile_id, text))
+        return "note-a"
+
+    monkeypatch.setattr(main.db, "add_note", fake_add_note)
+    monkeypatch.setattr(main, "_refresh_notes", lambda profile_id: refreshes.append(profile_id) or True)
+
+    try:
+        main.render_notes_section()
+    except RerunCalled:
+        pass
+    else:
+        raise AssertionError("adding a note should trigger rerun")
+
+    assert calls == [("account-a", "profile-a", "synthetic note text")]
+    assert refreshes == ["profile-a"]
+
+
+def test_note_delete_uses_authenticated_account_profile_and_note_id(monkeypatch):
+    fake_st = FakeStreamlit()
+    fake_st.private_ui_allowed = True
+    seed_authenticated_session(fake_st, account_id="account-a")
+    fake_st.session_state.update(
+        {
+            "selected_profile": {"_id": "profile-a", "goals": []},
+            "notes": [{"_id": "note-a", "text": "private"}],
+            "notes_profile_id": "profile-a",
+            "confirm_delete_note_id": "note-a",
+        }
+    )
+    fake_st.button_values = {"Confirm delete": True}
+    monkeypatch.setattr(main, "st", fake_st)
+    calls = []
+    refreshes = []
+
+    def fake_delete_note(account_id, profile_id, note_id):
+        calls.append((account_id, profile_id, note_id))
+        return True
+
+    monkeypatch.setattr(main.db, "delete_note", fake_delete_note)
+    monkeypatch.setattr(main, "_refresh_notes", lambda profile_id: refreshes.append(profile_id) or True)
+
+    try:
+        main.render_notes_section()
+    except RerunCalled:
+        pass
+    else:
+        raise AssertionError("deleting a note should trigger rerun")
+
+    assert calls == [("account-a", "profile-a", "note-a")]
+    assert refreshes == ["profile-a"]
+
+
+def test_account_b_notes_use_account_b_and_profile_b(monkeypatch):
+    fake_st = FakeStreamlit()
+    seed_authenticated_session(fake_st, account_id="account-b", username="UserB")
+    monkeypatch.setattr(main, "st", fake_st)
+    list_calls = []
+
+    def fake_list_notes(account_id, profile_id, limit=50):
+        list_calls.append((account_id, profile_id, limit))
+        return []
+
+    monkeypatch.setattr(main.db, "list_notes", fake_list_notes)
+
+    assert main._refresh_notes("profile-b") is True
+
+    assert list_calls == [("account-b", "profile-b", 50)]
+
+
+def test_selected_profile_change_clears_stale_note_state(monkeypatch):
+    fake_st = FakeStreamlit()
+    monkeypatch.setattr(main, "st", fake_st)
+    fake_st.session_state.update(
+        {
+            "notes": [{"_id": "note-a", "text": "old"}],
+            "notes_profile_id": "profile-a",
+            "confirm_delete_note_id": "note-a",
+        }
+    )
+
+    main._set_selected_profile({"_id": "profile-b", "goals": []})
+
+    assert fake_st.session_state["selected_profile"]["_id"] == "profile-b"
+    assert fake_st.session_state["notes"] == []
+    assert fake_st.session_state["notes_profile_id"] is None
+    assert fake_st.session_state["confirm_delete_note_id"] is None
+
+
+def test_ask_ai_uses_authenticated_account_profile_and_auth_session(monkeypatch):
+    fake_st = FakeStreamlit()
+    fake_st.private_ui_allowed = True
+    fake_st.submit_value = True
+    seed_authenticated_session(fake_st, account_id="account-a")
+    fake_st.session_state["auth_session_id"] = "session-a"
+    fake_st.session_state["selected_profile"] = {"_id": "profile-a", "name": "A", "goals": []}
+    fake_st.input_values = {
+        "Question": "What should I do next week?",
+        "account_id": "forged-account-id",
+        "auth_session_id": "forged-session-id",
+    }
+    monkeypatch.setattr(main, "st", fake_st)
+    calls = []
+
+    monkeypatch.setattr(
+        main.profiles,
+        "build_profile_context",
+        lambda profile: "profile context without account identifiers",
+    )
+
+    def fake_ask_ai(question, profile_context, account_id, profile_id, session_id=None):
+        calls.append((question, profile_context, account_id, profile_id, session_id))
+        return "answer"
+
+    monkeypatch.setattr(main.ai, "ask_ai", fake_ask_ai)
+
+    try:
+        main.render_ask_ai_section()
+    except RerunCalled:
+        pass
+    else:
+        raise AssertionError("Ask AI success should trigger rerun")
+
+    assert calls == [
+        (
+            "What should I do next week?",
+            "profile context without account identifiers",
+            "account-a",
+            "profile-a",
+            "session-a",
+        )
+    ]
+    assert fake_st.session_state["last_ai_answer"] == "answer"
+
+
+def test_notes_no_profile_guard_prevents_backend_calls(monkeypatch):
+    fake_st = FakeStreamlit()
+    fake_st.submit_value = True
+    seed_authenticated_session(fake_st, account_id="account-a")
+    monkeypatch.setattr(main, "st", fake_st)
+    monkeypatch.setattr(
+        main.db,
+        "add_note",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("notes backend must not run without selected profile")
+        ),
+    )
+    monkeypatch.setattr(
+        main.db,
+        "list_notes",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("notes list must not run without selected profile")
+        ),
+    )
+
+    main.render_notes_section()
+
+
+def test_ask_ai_no_profile_guard_prevents_backend_call(monkeypatch):
+    fake_st = FakeStreamlit()
+    fake_st.submit_value = True
+    seed_authenticated_session(fake_st, account_id="account-a")
+    monkeypatch.setattr(main, "st", fake_st)
+    monkeypatch.setattr(
+        main.ai,
+        "ask_ai",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("Ask AI must not run without selected profile")
+        ),
+    )
+
+    main.render_ask_ai_section()
 
 
 def test_duplicate_create_account_error_is_safe(monkeypatch):

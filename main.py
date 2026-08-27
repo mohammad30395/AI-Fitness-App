@@ -290,10 +290,14 @@ def _refresh_profiles(select_profile_id=None) -> bool:
         return False
 
 
-def _refresh_notes(user_id: str) -> bool:
+def _refresh_notes(profile_id: str) -> bool:
     try:
-        st.session_state["notes"] = db.list_notes(user_id, limit=50)
-        st.session_state["notes_profile_id"] = user_id
+        st.session_state["notes"] = db.list_notes(
+            _trusted_account_id(),
+            profile_id,
+            limit=50,
+        )
+        st.session_state["notes_profile_id"] = profile_id
         st.session_state["notes_error"] = None
         return True
     except Exception as error:
@@ -621,16 +625,16 @@ def render_notes_section() -> None:
                 st.form_submit_button("Add Note", disabled=True)
             return
 
-        user_id = str(selected_profile.get("_id") or "").strip()
-        if not user_id:
+        profile_id = str(selected_profile.get("_id") or "").strip()
+        if not profile_id:
             st.error("Selected profile is missing an ID.")
             return
 
         st.caption("Notes are saved and listed only for the selected profile.")
 
-        if str(st.session_state.get("notes_profile_id")) != user_id:
+        if str(st.session_state.get("notes_profile_id")) != profile_id:
             with st.spinner("Loading notes..."):
-                _refresh_notes(user_id)
+                _refresh_notes(profile_id)
 
         if st.session_state.get("notes_success"):
             st.success(st.session_state["notes_success"])
@@ -647,15 +651,16 @@ def render_notes_section() -> None:
 
         if submitted:
             try:
-                db.add_note(user_id, note_text)
-                _refresh_notes(user_id)
+                db.add_note(_trusted_account_id(), profile_id, note_text)
+                _refresh_notes(profile_id)
                 st.session_state["notes_success"] = "Note added."
                 st.session_state["notes_error"] = None
-                st.rerun()
             except Exception as error:
                 _record_ui_failure("Adding note", error)
                 st.session_state["notes_success"] = None
                 st.session_state["notes_error"] = _safe_notes_error("Adding note", error)
+                st.rerun()
+            else:
                 st.rerun()
 
         notes = st.session_state.get("notes") or []
@@ -664,7 +669,7 @@ def render_notes_section() -> None:
         with refresh_col:
             if st.button("Refresh notes", use_container_width=True):
                 with st.spinner("Loading notes..."):
-                    _refresh_notes(user_id)
+                    _refresh_notes(profile_id)
                 st.rerun()
 
         if not notes:
@@ -688,12 +693,11 @@ def render_notes_section() -> None:
                     with confirm_col:
                         if st.button("Confirm delete", key=f"confirm_delete_note_{note_key}"):
                             try:
-                                db.delete_note(user_id, note_id)
+                                db.delete_note(_trusted_account_id(), profile_id, note_id)
                                 st.session_state["confirm_delete_note_id"] = None
-                                _refresh_notes(user_id)
+                                _refresh_notes(profile_id)
                                 st.session_state["notes_success"] = "Note deleted."
                                 st.session_state["notes_error"] = None
-                                st.rerun()
                             except Exception as error:
                                 _record_ui_failure("Deleting note", error)
                                 st.session_state["notes_success"] = None
@@ -701,6 +705,8 @@ def render_notes_section() -> None:
                                     "Deleting note",
                                     error,
                                 )
+                                st.rerun()
+                            else:
                                 st.rerun()
                     with cancel_col:
                         if st.button("Cancel", key=f"cancel_delete_note_{note_key}"):
@@ -724,8 +730,8 @@ def render_ask_ai_section() -> None:
                 st.form_submit_button("Ask AI", disabled=True)
             return
 
-        user_id = str(selected_profile.get("_id") or "").strip()
-        if not user_id:
+        profile_id = str(selected_profile.get("_id") or "").strip()
+        if not profile_id:
             st.error("Selected profile is missing an ID.")
             return
 
@@ -754,14 +760,21 @@ def render_ask_ai_section() -> None:
             try:
                 profile_context = profiles.build_profile_context(selected_profile)
                 with st.spinner("Asking AI..."):
-                    answer = ai.ask_ai(question, profile_context, user_id)
+                    answer = ai.ask_ai(
+                        question,
+                        profile_context,
+                        _trusted_account_id(),
+                        profile_id,
+                        session_id=st.session_state["auth_session_id"],
+                    )
                 st.session_state["last_ai_answer"] = answer
                 st.session_state["ask_ai_error"] = None
-                st.rerun()
             except Exception as error:
                 _record_ui_failure("Ask AI", error)
                 st.session_state["last_ai_answer"] = ""
                 st.session_state["ask_ai_error"] = _safe_ask_ai_error("Ask AI", error)
+                st.rerun()
+            else:
                 st.rerun()
 
         last_answer = st.session_state.get("last_ai_answer")
