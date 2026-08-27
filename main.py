@@ -95,6 +95,13 @@ def _is_authenticated_session() -> bool:
     )
 
 
+def _trusted_account_id() -> str:
+    account_id = st.session_state["account_id"]
+    if not isinstance(account_id, str) or not account_id.strip():
+        raise RuntimeError("Authenticated account is missing.")
+    return account_id
+
+
 def _reset_session_for_logout() -> None:
     st.session_state.clear()
     _initialize_auth_session_state()
@@ -247,17 +254,29 @@ def _set_nutrition_draft(profile_id, nutrition) -> None:
 
 def _refresh_profiles(select_profile_id=None) -> bool:
     try:
-        profile_list = profiles.get_all_profiles()
+        account_id = _trusted_account_id()
+        profile_list = profiles.get_all_profiles(account_id)
         st.session_state["profiles"] = profile_list
+        profile_ids = [profile.get("_id") for profile in profile_list if profile.get("_id")]
 
-        if select_profile_id is not None:
-            st.session_state["selected_profile_id"] = select_profile_id
-        elif st.session_state.get("selected_profile_id") is None and profile_list:
-            st.session_state["selected_profile_id"] = profile_list[0].get("_id")
+        selected_profile_id = st.session_state.get("selected_profile_id")
+        if select_profile_id is not None and any(
+            str(profile_id) == str(select_profile_id) for profile_id in profile_ids
+        ):
+            selected_profile_id = select_profile_id
+        elif selected_profile_id is not None and any(
+            str(profile_id) == str(selected_profile_id) for profile_id in profile_ids
+        ):
+            selected_profile_id = selected_profile_id
+        elif profile_ids:
+            selected_profile_id = profile_ids[0]
+        else:
+            selected_profile_id = None
 
+        st.session_state["selected_profile_id"] = selected_profile_id
         selected_id = st.session_state.get("selected_profile_id")
         if selected_id is not None:
-            _set_selected_profile(profiles.get_profile_by_id(selected_id))
+            _set_selected_profile(profiles.get_profile_by_id(account_id, selected_id))
         else:
             _set_selected_profile(None)
 
@@ -364,16 +383,20 @@ def _render_profile_form(*, mode: str, profile: dict | None = None) -> None:
 
     try:
         if is_edit:
+            account_id = _trusted_account_id()
             profile_id = st.session_state.get("selected_profile_id")
             if not profile_id:
                 raise ValueError("No profile selected")
-            updated_profile = profiles.save_profile_changes(profile_id, **profile_payload)
+            updated_profile = profiles.save_profile_changes(account_id, profile_id, **profile_payload)
             st.session_state["selected_profile_id"] = updated_profile.get("_id", profile_id)
             st.session_state["selected_profile"] = updated_profile
             _refresh_profiles(st.session_state["selected_profile_id"])
             st.session_state["profile_success"] = "Profile updated."
         else:
-            new_profile_id = profiles.create_new_profile(**profile_payload)
+            new_profile_id = profiles.create_new_profile(
+                account_id=_trusted_account_id(),
+                **profile_payload,
+            )
             _refresh_profiles(new_profile_id)
             st.session_state["profile_success"] = "Profile created."
         st.session_state["ui_error"] = None
@@ -421,8 +444,9 @@ def render_profile_section() -> None:
 
             if str(selected_id) != str(st.session_state.get("selected_profile_id")):
                 try:
+                    account_id = _trusted_account_id()
                     st.session_state["selected_profile_id"] = selected_id
-                    _set_selected_profile(profiles.get_profile_by_id(selected_id))
+                    _set_selected_profile(profiles.get_profile_by_id(account_id, selected_id))
                     st.session_state["ui_error"] = None
                     st.rerun()
                 except Exception as error:
@@ -569,7 +593,11 @@ def render_nutrition_section() -> None:
             profile_id = selected_profile.get("_id")
             if not profile_id:
                 raise ValueError("No profile selected")
-            updated_profile = profiles.save_profile_changes(profile_id, nutrition=nutrition_payload)
+            updated_profile = profiles.save_profile_changes(
+                _trusted_account_id(),
+                profile_id,
+                nutrition=nutrition_payload,
+            )
             st.session_state["selected_profile_id"] = updated_profile.get("_id", profile_id)
             _refresh_profiles(st.session_state["selected_profile_id"])
             st.session_state["macro_success"] = "Nutrition targets saved."
