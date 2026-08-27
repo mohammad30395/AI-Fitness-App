@@ -11,6 +11,13 @@ import profiles
 
 logger = logging.getLogger(__name__)
 
+AUTH_SESSION_DEFAULTS = {
+    "authenticated": False,
+    "account_id": None,
+    "username": None,
+    "auth_session_id": None,
+}
+
 SESSION_DEFAULTS = {
     "selected_profile_id": None,
     "selected_profile": None,
@@ -66,6 +73,37 @@ def initialize_session_state() -> None:
     for key, value in SESSION_DEFAULTS.items():
         if key not in st.session_state:
             st.session_state[key] = _default_session_value(value)
+
+
+def _initialize_auth_session_state() -> None:
+    for key, value in AUTH_SESSION_DEFAULTS.items():
+        if key not in st.session_state:
+            st.session_state[key] = value
+
+
+def _is_authenticated_session() -> bool:
+    return (
+        st.session_state.get("authenticated") is True
+        and isinstance(st.session_state.get("account_id"), str)
+        and bool(st.session_state.get("account_id").strip())
+        and isinstance(st.session_state.get("username"), str)
+        and bool(st.session_state.get("username").strip())
+        and isinstance(st.session_state.get("auth_session_id"), str)
+        and bool(st.session_state.get("auth_session_id").strip())
+    )
+
+
+def _reset_session_for_logout() -> None:
+    st.session_state.clear()
+    _initialize_auth_session_state()
+
+
+def _enforce_authentication_gate() -> None:
+    if _is_authenticated_session():
+        return
+
+    st.info("Authentication required. Login and account creation will be added in the next milestone.")
+    st.stop()
 
 
 def _goals_from_text(goals_text: str) -> list[str]:
@@ -634,6 +672,8 @@ def main() -> None:
         page_title="Personal Fitness AI Assistant",
         layout="wide",
     )
+    _initialize_auth_session_state()
+    _enforce_authentication_gate()
     initialize_session_state()
 
     st.title("Personal Fitness AI Assistant")
