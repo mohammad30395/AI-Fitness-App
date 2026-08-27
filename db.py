@@ -402,15 +402,21 @@ def list_notes(account_id: Any, profile_id: Any, limit: int = 50) -> list[dict[s
         raise _wrap_database_error("Listing notes", error) from error
 
 
-def delete_note(user_id: Any, note_id: Any) -> bool:
-    validated_user_id = _validate_user_id(user_id)
+def delete_note(account_id: Any, profile_id: Any, note_id: Any) -> bool:
+    validated_account_id = _validate_account_id(account_id)
+    validated_profile_id = _validate_user_id(profile_id)
     validated_note_id = _validate_note_id(note_id)
     try:
+        get_profile(validated_account_id, validated_profile_id)
         collection = get_notes_collection()
-        note_filter = {"_id": validated_note_id, "user_id": validated_user_id}
+        note_filter = {
+            "_id": validated_note_id,
+            "owner_account_id": validated_account_id,
+            "user_id": validated_profile_id,
+        }
 
         if collection.find_one(note_filter) is None:
-            raise NoteNotFoundError(f"Note not found for this user: {validated_note_id}")
+            raise NoteNotFoundError("Note not found.")
 
         collection.delete_one(note_filter)
         return True
@@ -420,16 +426,22 @@ def delete_note(user_id: Any, note_id: Any) -> bool:
         raise _wrap_database_error("Deleting note", error) from error
 
 
-def update_note(user_id: Any, note_id: Any, text: Any) -> dict[str, Any]:
-    validated_user_id = _validate_user_id(user_id)
+def update_note(account_id: Any, profile_id: Any, note_id: Any, text: Any) -> dict[str, Any]:
+    validated_account_id = _validate_account_id(account_id)
+    validated_profile_id = _validate_user_id(profile_id)
     validated_note_id = _validate_note_id(note_id)
     validated_text = _validate_note_text(text)
     try:
+        get_profile(validated_account_id, validated_profile_id)
         collection = get_notes_collection()
-        note_filter = {"_id": validated_note_id, "user_id": validated_user_id}
+        note_filter = {
+            "_id": validated_note_id,
+            "owner_account_id": validated_account_id,
+            "user_id": validated_profile_id,
+        }
 
         if collection.find_one(note_filter) is None:
-            raise NoteNotFoundError(f"Note not found for this user: {validated_note_id}")
+            raise NoteNotFoundError("Note not found.")
 
         collection.update_one(
             note_filter,
@@ -440,7 +452,7 @@ def update_note(user_id: Any, note_id: Any, text: Any) -> dict[str, Any]:
         updated = collection.find_one(note_filter)
         normalized = _normalize_document(updated)
         if normalized is None:
-            raise NoteNotFoundError(f"Note not found after update: {validated_note_id}")
+            raise NoteNotFoundError("Note not found.")
         return normalized
     except EXPECTED_APPLICATION_ERRORS:
         raise
