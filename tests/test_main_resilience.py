@@ -24,15 +24,28 @@ class FakeForm:
         return False
 
 
+class FakeTab:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+
 class FakeStreamlit:
     def __init__(self):
         self.session_state = FakeSessionState()
         self.info_messages = []
         self.error_messages = []
+        self.caption_messages = []
         self.page_config = None
         self.input_values = {}
+        self.text_input_calls = []
         self.submit_value = False
+        self.button_values = {}
+        self.tab_labels = []
         self.headers = []
+        self.private_ui_allowed = False
 
     def set_page_config(self, **kwargs):
         self.page_config = kwargs
@@ -46,14 +59,22 @@ class FakeStreamlit:
     def header(self, message):
         self.headers.append(message)
 
+    def tabs(self, labels):
+        self.tab_labels.append(tuple(labels))
+        return [FakeTab() for _ in labels]
+
     def form(self, key):
         return FakeForm(self)
 
     def text_input(self, label, **kwargs):
+        self.text_input_calls.append((label, kwargs))
         return self.input_values.get(label, "")
 
     def form_submit_button(self, label, **kwargs):
         return self.submit_value
+
+    def button(self, label, **kwargs):
+        return self.button_values.get(label, False)
 
     def stop(self):
         raise StopCalled
@@ -62,13 +83,17 @@ class FakeStreamlit:
         raise RerunCalled
 
     def title(self, *args, **kwargs):
-        raise AssertionError("private UI must not render before authentication")
+        if not self.private_ui_allowed:
+            raise AssertionError("private UI must not render before authentication")
 
     def caption(self, *args, **kwargs):
-        raise AssertionError("private UI must not render before authentication")
+        self.caption_messages.append(args[0] if args else "")
+        if not self.private_ui_allowed:
+            raise AssertionError("private UI must not render before authentication")
 
     def divider(self, *args, **kwargs):
-        raise AssertionError("private UI must not render before authentication")
+        if not self.private_ui_allowed:
+            raise AssertionError("private UI must not render before authentication")
 
 
 def test_auth_session_defaults_initialize_fresh_state(monkeypatch):
@@ -192,6 +217,7 @@ def test_unauthenticated_main_stops_before_private_work(monkeypatch):
     assert fake_st.info_messages == [
         "Authentication required."
     ]
+    assert fake_st.tab_labels == [("Login", "Create Account")]
     assert fake_st.session_state == {
         "authenticated": False,
         "account_id": None,
@@ -281,6 +307,192 @@ def test_successful_create_account_establishes_trusted_session(monkeypatch):
     assert fake_st.session_state["username"] == "TestUser"
     assert isinstance(fake_st.session_state["auth_session_id"], str)
     assert fake_st.session_state["auth_session_id"]
+
+
+def test_successful_login_establishes_trusted_session(monkeypatch):
+    fake_st = FakeStreamlit()
+    fake_st.submit_value = True
+    fake_st.input_values = {
+        "Username": "LoginUser",
+        "Password": "login-password-1",
+    }
+    monkeypatch.setattr(main, "st", fake_st)
+    calls = []
+
+    def fake_authenticate(username, password):
+        calls.append((username, password))
+        return {"account_id": "account-login-test", "username": "LoginUser"}
+
+    monkeypatch.setattr(main.auth, "authenticate", fake_authenticate)
+
+    main._initialize_auth_session_state()
+    try:
+        main._render_login_form()
+    except RerunCalled:
+        pass
+    else:
+        raise AssertionError("successful login should trigger rerun")
+
+    assert calls == [("LoginUser", "login-password-1")]
+    assert fake_st.session_state["authenticated"] is True
+    assert fake_st.session_state["account_id"] == "account-login-test"
+    assert fake_st.session_state["username"] == "LoginUser"
+    assert isinstance(fake_st.session_state["auth_session_id"], str)
+    assert fake_st.session_state["auth_session_id"]
+
+
+def test_login_account_id_comes_only_from_backend_return(monkeypatch):
+    fake_st = FakeStreamlit()
+    fake_st.submit_value = True
+    fake_st.input_values = {
+        "Username": "LoginUser",
+        "Password": "login-password-1",
+        "account_id": "forged-account-id",
+    }
+    monkeypatch.setattr(main, "st", fake_st)
+    monkeypatch.setattr(
+        main.auth,
+        "authenticate",
+        lambda username, password: {"account_id": "backend-account-id", "username": "LoginUser"},
+    )
+
+    main._initialize_auth_session_state()
+    try:
+        main._render_login_form()
+    except RerunCalled:
+        pass
+    else:
+        raise AssertionError("successful login should trigger rerun")
+
+    assert all(label != "account_id" for label, _kwargs in fake_st.text_input_calls)
+    assert fake_st.session_state["account_id"] == "backend-account-id"
+
+
+def test_wrong_password_login_is_generic_and_unauthenticated(monkeypatch):
+    fake_st = FakeStreamlit()
+    fake_st.submit_value = True
+    fake_st.input_values = {
+        "Username": "LoginUser",
+        "Password": "wrong-password-1",
+    }
+    monkeypatch.setattr(main, "st", fake_st)
+
+    def fake_authenticate(username, password):
+        raise main.auth.AuthenticationError("Invalid username or password.")
+
+    monkeypatch.setattr(main.auth, "authenticate", fake_authenticate)
+
+    main._initialize_auth_session_state()
+    main._render_login_form()
+
+    assert fake_st.error_messages == ["Invalid username or password."]
+    assert fake_st.session_state["authenticated"] is False
+    assert fake_st.session_state["account_id"] is None
+    assert fake_st.session_state["username"] is None
+    assert fake_st.session_state["auth_session_id"] is None
+
+
+def test_nonexistent_username_login_matches_wrong_password_response(monkeypatch):
+    fake_st = FakeStreamlit()
+    fake_st.submit_value = True
+    fake_st.input_values = {
+        "Username": "MissingUser",
+        "Password": "login-password-1",
+    }
+    monkeypatch.setattr(main, "st", fake_st)
+
+    def fake_authenticate(username, password):
+        raise main.auth.AuthenticationError("Invalid username or password.")
+
+    monkeypatch.setattr(main.auth, "authenticate", fake_authenticate)
+
+    main._initialize_auth_session_state()
+    main._render_login_form()
+
+    assert fake_st.error_messages == ["Invalid username or password."]
+    assert fake_st.session_state["authenticated"] is False
+    assert fake_st.session_state["account_id"] is None
+
+
+def test_login_unexpected_error_is_generic(monkeypatch):
+    fake_st = FakeStreamlit()
+    fake_st.submit_value = True
+    fake_st.input_values = {
+        "Username": "LoginUser",
+        "Password": "login-password-1",
+    }
+    monkeypatch.setattr(main, "st", fake_st)
+
+    def fake_authenticate(username, password):
+        raise RuntimeError("AstraCS:super-secret-token password_hash private detail")
+
+    monkeypatch.setattr(main.auth, "authenticate", fake_authenticate)
+
+    main._initialize_auth_session_state()
+    main._render_login_form()
+
+    assert fake_st.error_messages == ["Unable to log in right now."]
+    assert "AstraCS" not in fake_st.error_messages[0]
+    assert "password_hash" not in fake_st.error_messages[0]
+    assert fake_st.session_state["authenticated"] is False
+    assert fake_st.session_state["account_id"] is None
+
+
+def test_logout_clears_sensitive_state_and_reruns(monkeypatch):
+    fake_st = FakeStreamlit()
+    fake_st.private_ui_allowed = True
+    fake_st.button_values = {"Logout": True}
+    fake_st.session_state.update(
+        {
+            "authenticated": True,
+            "account_id": "account-a",
+            "username": "UserA",
+            "auth_session_id": "session-a",
+            "selected_profile_id": "profile-a",
+            "selected_profile": {"_id": "profile-a"},
+            "profiles": [{"_id": "profile-a"}],
+            "nutrition": {"calories": 2000},
+            "notes": [{"_id": "note-a", "text": "private"}],
+            "last_ai_answer": "private answer",
+            "confirm_delete_note_id": "note-a",
+        }
+    )
+    monkeypatch.setattr(main, "st", fake_st)
+
+    try:
+        main._render_authenticated_header()
+    except RerunCalled:
+        pass
+    else:
+        raise AssertionError("logout should trigger rerun")
+
+    assert fake_st.session_state == {
+        "authenticated": False,
+        "account_id": None,
+        "username": None,
+        "auth_session_id": None,
+    }
+
+
+def test_auth_session_id_rotates_between_logins(monkeypatch):
+    fake_st = FakeStreamlit()
+    monkeypatch.setattr(main, "st", fake_st)
+
+    main._initialize_auth_session_state()
+    main._establish_authenticated_session(
+        {"account_id": "account-login-test", "username": "LoginUser"}
+    )
+    first_session_id = fake_st.session_state["auth_session_id"]
+
+    main._reset_session_for_logout()
+    main._establish_authenticated_session(
+        {"account_id": "account-login-test", "username": "LoginUser"}
+    )
+    second_session_id = fake_st.session_state["auth_session_id"]
+
+    assert first_session_id
+    assert second_session_id
+    assert first_session_id != second_session_id
 
 
 def test_duplicate_create_account_error_is_safe(monkeypatch):

@@ -100,6 +100,35 @@ def _reset_session_for_logout() -> None:
     _initialize_auth_session_state()
 
 
+def _establish_authenticated_session(account: dict[str, str]) -> None:
+    st.session_state["authenticated"] = True
+    st.session_state["account_id"] = account["account_id"]
+    st.session_state["username"] = account["username"]
+    st.session_state["auth_session_id"] = str(uuid.uuid4())
+
+
+def _render_login_form() -> None:
+    st.header("Login")
+    with st.form("login_form"):
+        username = st.text_input("Username")
+        password = st.text_input("Password", type="password")
+        submitted = st.form_submit_button("Login", type="primary")
+
+    if not submitted:
+        return
+
+    try:
+        account = auth.authenticate(username, password)
+    except auth.AuthenticationError:
+        st.error("Invalid username or password.")
+    except Exception as error:
+        _record_ui_failure("Logging in", error)
+        st.error("Unable to log in right now.")
+    else:
+        _establish_authenticated_session(account)
+        st.rerun()
+
+
 def _render_create_account_form() -> None:
     st.header("Create Account")
     with st.form("create_account_form"):
@@ -125,20 +154,32 @@ def _render_create_account_form() -> None:
         _record_ui_failure("Creating account", error)
         st.error("Unable to create account right now.")
     else:
-        st.session_state["authenticated"] = True
-        st.session_state["account_id"] = account["account_id"]
-        st.session_state["username"] = account["username"]
-        st.session_state["auth_session_id"] = str(uuid.uuid4())
+        _establish_authenticated_session(account)
         st.rerun()
+
+
+def _render_authentication_ui() -> None:
+    st.info("Authentication required.")
+    login_tab, create_tab = st.tabs(["Login", "Create Account"])
+    with login_tab:
+        _render_login_form()
+    with create_tab:
+        _render_create_account_form()
 
 
 def _enforce_authentication_gate() -> None:
     if _is_authenticated_session():
         return
 
-    st.info("Authentication required.")
-    _render_create_account_form()
+    _render_authentication_ui()
     st.stop()
+
+
+def _render_authenticated_header() -> None:
+    st.caption(f"Signed in as {st.session_state['username']}")
+    if st.button("Logout"):
+        _reset_session_for_logout()
+        st.rerun()
 
 
 def _goals_from_text(goals_text: str) -> list[str]:
@@ -711,6 +752,7 @@ def main() -> None:
     _enforce_authentication_gate()
     initialize_session_state()
 
+    _render_authenticated_header()
     st.title("Personal Fitness AI Assistant")
     st.caption(
         "This app provides general fitness information for planning and learning. "
