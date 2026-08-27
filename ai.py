@@ -88,6 +88,19 @@ def _validate_timeout(timeout: float) -> float:
     return timeout_value
 
 
+def build_ask_ai_search_filter(account_id: str, profile_id: str) -> dict[str, str]:
+    """Build the account-scoped metadata filter for Ask AI note retrieval."""
+    if not isinstance(account_id, str) or not account_id.strip():
+        raise ValueError("account_id must be a non-empty string.")
+    if not isinstance(profile_id, str) or not profile_id.strip():
+        raise ValueError("profile_id must be a non-empty string.")
+
+    return {
+        "owner_account_id": account_id.strip(),
+        "user_id": profile_id.strip(),
+    }
+
+
 def _top_level_preview(data: Any) -> str:
     if isinstance(data, Mapping):
         keys = sorted(str(key) for key in data.keys())

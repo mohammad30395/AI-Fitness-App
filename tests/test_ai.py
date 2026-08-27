@@ -332,6 +332,60 @@ def test_ask_ai_uses_configured_flow_and_runtime_tweaks(monkeypatch):
     ]
 
 
+def test_build_ask_ai_search_filter_returns_compound_ownership_filter():
+    result = ai.build_ask_ai_search_filter("account-a", "profile-a")
+
+    assert result == {
+        "owner_account_id": "account-a",
+        "user_id": "profile-a",
+    }
+    assert set(result) == {"owner_account_id", "user_id"}
+
+
+@pytest.mark.parametrize(
+    ("account_id", "profile_id", "expected"),
+    [
+        (
+            "account-a",
+            "profile-a",
+            {"owner_account_id": "account-a", "user_id": "profile-a"},
+        ),
+        (
+            "account-b",
+            "profile-b",
+            {"owner_account_id": "account-b", "user_id": "profile-b"},
+        ),
+    ],
+)
+def test_build_ask_ai_search_filter_preserves_account_profile_pairings(
+    account_id,
+    profile_id,
+    expected,
+):
+    assert ai.build_ask_ai_search_filter(account_id, profile_id) == expected
+
+
+def test_build_ask_ai_search_filter_does_not_substitute_username():
+    result = ai.build_ask_ai_search_filter("account-uuid-123", "profile-1")
+
+    assert result["owner_account_id"] == "account-uuid-123"
+    assert "username" not in result
+    assert "password" not in result
+    assert "password_hash" not in result
+
+
+@pytest.mark.parametrize("account_id", ["", "   ", None, 123])
+def test_build_ask_ai_search_filter_rejects_invalid_account_id(account_id):
+    with pytest.raises(ValueError, match="account_id"):
+        ai.build_ask_ai_search_filter(account_id, "profile-a")
+
+
+@pytest.mark.parametrize("profile_id", ["", "   ", None, 123])
+def test_build_ask_ai_search_filter_rejects_invalid_profile_id(profile_id):
+    with pytest.raises(ValueError, match="profile_id"):
+        ai.build_ask_ai_search_filter("account-a", profile_id)
+
+
 @pytest.mark.parametrize("question", ["", "   ", None])
 def test_ask_ai_rejects_blank_questions(monkeypatch, question):
     patch_ask_ai_config(monkeypatch)
