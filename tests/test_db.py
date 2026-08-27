@@ -31,6 +31,7 @@ def patch_config(monkeypatch, *, keyspace=""):
         "ASTRA_DB_APPLICATION_TOKEN": "AstraCS:super-secret-token",
         "ASTRA_DB_KEYSPACE": keyspace,
         "ASTRA_PERSONAL_COLLECTION": "personal_data",
+        "ASTRA_ACCOUNTS_COLLECTION": "accounts",
     }
     monkeypatch.setattr(db.config, "get_env_value", lambda name: values.get(name, ""))
     return values
@@ -145,6 +146,21 @@ def test_get_personal_collection_uses_configured_collection(monkeypatch):
 
     assert db.get_personal_collection() == "collection"
     assert calls == ["personal_data"]
+
+
+def test_get_accounts_collection_uses_configured_collection(monkeypatch):
+    values = patch_config(monkeypatch)
+    calls = []
+
+    class FakeDatabase:
+        def get_collection(self, name):
+            calls.append(name)
+            return "collection"
+
+    monkeypatch.setattr(db, "get_database", lambda: FakeDatabase())
+
+    assert db.get_accounts_collection() == "collection"
+    assert calls == [values["ASTRA_ACCOUNTS_COLLECTION"]]
 
 
 def test_list_profiles_returns_plain_dicts(monkeypatch):

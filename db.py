@@ -266,6 +266,19 @@ def get_notes_collection():
         raise _wrap_database_error("Opening notes collection", error) from error
 
 
+def get_accounts_collection():
+    collection_name = (
+        config.get_env_value("ASTRA_ACCOUNTS_COLLECTION").strip()
+        or config.ASTRA_ACCOUNTS_COLLECTION
+    )
+    try:
+        return get_database().get_collection(collection_name)
+    except EXPECTED_APPLICATION_ERRORS:
+        raise
+    except Exception as error:
+        raise _wrap_database_error("Opening accounts collection", error) from error
+
+
 def list_profiles() -> list[dict[str, Any]]:
     try:
         return [_normalize_document(document) for document in get_personal_collection().find({})]
