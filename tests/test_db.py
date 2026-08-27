@@ -542,6 +542,13 @@ def test_update_nutrition_uses_same_ownership_boundary(monkeypatch):
             {"nutrition": {"calories": 1800}},
         )
     assert collection.documents[0]["nutrition"] == nutrition
+    with pytest.raises(db.ProfileNotFoundError):
+        db.update_personal_information(
+            ACCOUNT_A,
+            "profile-b",
+            {"nutrition": {"calories": 1900}},
+        )
+    assert collection.documents[1]["nutrition"]["calories"] == 2100
 
 
 def test_update_missing_profile_raises_not_found_without_upsert(monkeypatch):
