@@ -27,7 +27,24 @@ def test_get_notes_collection_uses_configured_collection(monkeypatch):
     assert calls == ["notes"]
 
 
-def test_add_note_includes_user_id_text_and_vectorize(monkeypatch):
+def patch_owned_profiles(monkeypatch):
+    profile_checks = []
+
+    def fake_get_profile(account_id, profile_id):
+        profile_checks.append((account_id, profile_id))
+        if (account_id, profile_id) in {
+            (ACCOUNT_A, PROFILE_A),
+            (ACCOUNT_B, PROFILE_B),
+        }:
+            return {"_id": profile_id, "owner_account_id": account_id}
+        raise db.ProfileNotFoundError("Profile not found.")
+
+    monkeypatch.setattr(db, "get_profile", fake_get_profile)
+    return profile_checks
+
+
+def test_add_note_includes_owner_profile_text_and_vectorize(monkeypatch):
+    profile_checks = patch_owned_profiles(monkeypatch)
     calls = []
 
     class FakeCollection:
@@ -37,12 +54,14 @@ def test_add_note_includes_user_id_text_and_vectorize(monkeypatch):
 
     monkeypatch.setattr(db, "get_notes_collection", lambda: FakeCollection())
 
-    inserted_id = db.add_note("user-1", "  Readable note text  ")
+    inserted_id = db.add_note(ACCOUNT_A, PROFILE_A, "  Readable note text  ")
 
     assert inserted_id == "note-1"
+    assert profile_checks == [(ACCOUNT_A, PROFILE_A)]
     assert calls == [
         {
-            "user_id": "user-1",
+            "owner_account_id": ACCOUNT_A,
+            "user_id": PROFILE_A,
             "text": "Readable note text",
             "$vectorize": "Readable note text",
         }
@@ -50,8 +69,78 @@ def test_add_note_includes_user_id_text_and_vectorize(monkeypatch):
     assert "$vector" not in calls[0]
 
 
+def test_add_note_uses_supplied_account_and_profile_for_each_owner(monkeypatch):
+    profile_checks = patch_owned_profiles(monkeypatch)
+    calls = []
+
+    class FakeCollection:
+        def insert_one(self, document):
+            calls.append(document)
+            return SimpleNamespace(inserted_id=f"note-{len(calls)}")
+
+    monkeypatch.setattr(db, "get_notes_collection", lambda: FakeCollection())
+
+    first = db.add_note(ACCOUNT_A, PROFILE_A, "A note")
+    second = db.add_note(ACCOUNT_B, PROFILE_B, "B note")
+
+    assert first == "note-1"
+    assert second == "note-2"
+    assert profile_checks == [(ACCOUNT_A, PROFILE_A), (ACCOUNT_B, PROFILE_B)]
+    assert calls[0]["owner_account_id"] == ACCOUNT_A
+    assert calls[0]["user_id"] == PROFILE_A
+    assert calls[1]["owner_account_id"] == ACCOUNT_B
+    assert calls[1]["user_id"] == PROFILE_B
+    assert calls[0]["owner_account_id"] != calls[1]["owner_account_id"]
+    assert calls[0]["user_id"] != calls[1]["user_id"]
+
+
+def test_add_note_rejects_foreign_profile_before_insert(monkeypatch):
+    profile_checks = patch_owned_profiles(monkeypatch)
+
+    class FakeCollection:
+        def insert_one(self, document):
+            raise AssertionError("insert_one must not be called for foreign profile")
+
+    monkeypatch.setattr(db, "get_notes_collection", lambda: FakeCollection())
+
+    with pytest.raises(db.ProfileNotFoundError) as account_a_foreign:
+        db.add_note(ACCOUNT_A, PROFILE_B, "A should not write to B")
+    with pytest.raises(db.ProfileNotFoundError) as account_b_foreign:
+        db.add_note(ACCOUNT_B, PROFILE_A, "B should not write to A")
+
+    assert profile_checks == [(ACCOUNT_A, PROFILE_B), (ACCOUNT_B, PROFILE_A)]
+    assert type(account_a_foreign.value) is type(account_b_foreign.value)
+    assert str(account_a_foreign.value) == str(account_b_foreign.value)
+
+
+def test_add_note_missing_and_foreign_profile_fail_indistinguishably(monkeypatch):
+    patch_owned_profiles(monkeypatch)
+
+    class FakeCollection:
+        def insert_one(self, document):
+            raise AssertionError("insert_one must not be called for unauthorized profile")
+
+    monkeypatch.setattr(db, "get_notes_collection", lambda: FakeCollection())
+
+    with pytest.raises(db.ProfileNotFoundError) as missing_profile:
+        db.add_note(ACCOUNT_A, "missing-profile", "Readable note text")
+    with pytest.raises(db.ProfileNotFoundError) as foreign_profile:
+        db.add_note(ACCOUNT_A, PROFILE_B, "Readable note text")
+
+    assert type(missing_profile.value) is type(foreign_profile.value)
+    assert str(missing_profile.value) == str(foreign_profile.value)
+
+
 @pytest.mark.parametrize("blank_text", ["", "   ", None])
 def test_add_note_rejects_blank_notes_before_database_call(monkeypatch, blank_text):
+    monkeypatch.setattr(
+        db,
+        "get_profile",
+        lambda account_id, profile_id: (_ for _ in ()).throw(
+            AssertionError("profile ownership must not be checked for invalid text")
+        ),
+    )
+
     class FakeCollection:
         def insert_one(self, document):
             raise AssertionError("insert_one must not be called for invalid text")
@@ -59,7 +148,52 @@ def test_add_note_rejects_blank_notes_before_database_call(monkeypatch, blank_te
     monkeypatch.setattr(db, "get_notes_collection", lambda: FakeCollection())
 
     with pytest.raises(db.InvalidNoteError):
-        db.add_note("user-1", blank_text)
+        db.add_note(ACCOUNT_A, PROFILE_A, blank_text)
+
+
+@pytest.mark.parametrize("account_id", ["", "   ", None])
+def test_add_note_rejects_blank_account_id_before_database_call(monkeypatch, account_id):
+    monkeypatch.setattr(
+        db,
+        "get_profile",
+        lambda account_id, profile_id: (_ for _ in ()).throw(
+            AssertionError("profile ownership must not be checked for invalid account_id")
+        ),
+    )
+
+    class FakeCollection:
+        def insert_one(self, document):
+            raise AssertionError("insert_one must not be called for invalid account_id")
+
+    monkeypatch.setattr(db, "get_notes_collection", lambda: FakeCollection())
+
+    with pytest.raises(db.InvalidProfileError):
+        db.add_note(account_id, PROFILE_A, "Readable note text")
+
+
+@pytest.mark.parametrize("profile_id", ["", "   ", None])
+def test_add_note_rejects_blank_profile_id_before_database_call(monkeypatch, profile_id):
+    monkeypatch.setattr(
+        db,
+        "get_profile",
+        lambda account_id, profile_id: (_ for _ in ()).throw(
+            AssertionError("profile ownership must not be checked for invalid profile_id")
+        ),
+    )
+
+    class FakeCollection:
+        def insert_one(self, document):
+            raise AssertionError("insert_one must not be called for invalid profile_id")
+
+    monkeypatch.setattr(db, "get_notes_collection", lambda: FakeCollection())
+
+    with pytest.raises(db.InvalidNoteError):
+        db.add_note(ACCOUNT_A, profile_id, "Readable note text")
+
+
+def test_add_note_requires_account_id_argument():
+    with pytest.raises(TypeError):
+        db.add_note(PROFILE_A, "Readable note text")
 
 
 def test_list_notes_filters_by_owner_profile_and_limit(monkeypatch):
@@ -184,6 +318,7 @@ def test_list_notes_rejects_blank_profile_id_before_database_call(monkeypatch, p
 
 
 def test_add_note_wraps_database_error_without_token(monkeypatch):
+    patch_owned_profiles(monkeypatch)
     secret = "AstraCS:super-secret-token"
 
     class FakeCollection:
@@ -193,7 +328,7 @@ def test_add_note_wraps_database_error_without_token(monkeypatch):
     monkeypatch.setattr(db, "get_notes_collection", lambda: FakeCollection())
 
     with pytest.raises(db.DatabaseConnectionError) as exc_info:
-        db.add_note("user-1", "Readable note text")
+        db.add_note(ACCOUNT_A, PROFILE_A, "Readable note text")
 
     message = str(exc_info.value)
     assert "Adding note failed" in message

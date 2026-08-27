@@ -218,10 +218,13 @@ def _validate_note_text(text: Any) -> str:
     return text.strip()
 
 
-def _note_document(user_id: Any, text: Any) -> dict[str, Any]:
+def _note_document(account_id: Any, profile_id: Any, text: Any) -> dict[str, Any]:
+    validated_account_id = _validate_account_id(account_id)
+    validated_profile_id = _validate_user_id(profile_id)
     validated_text = _validate_note_text(text)
     return {
-        "user_id": _validate_user_id(user_id),
+        "owner_account_id": validated_account_id,
+        "user_id": validated_profile_id,
         "text": validated_text,
         "$vectorize": validated_text,
     }
@@ -365,9 +368,10 @@ def update_personal_information(
         raise _wrap_database_error("Updating profile", error) from error
 
 
-def add_note(user_id: Any, text: Any) -> Any:
-    document = _note_document(user_id, text)
+def add_note(account_id: Any, profile_id: Any, text: Any) -> Any:
+    document = _note_document(account_id, profile_id, text)
     try:
+        get_profile(document["owner_account_id"], document["user_id"])
         result = get_notes_collection().insert_one(document)
         return _inserted_id(result)
     except EXPECTED_APPLICATION_ERRORS:
