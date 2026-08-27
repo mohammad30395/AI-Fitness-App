@@ -1,0 +1,72 @@
+{
+  "counts": {
+    "eligible_notes": 5,
+    "eligible_profiles": 5,
+    "invalid_notes": 0,
+    "notes_linked_to_owned_profiles": 0,
+    "orphaned_notes": 0
+  },
+  "eligible_notes": [
+    {
+      "note_id": "75099919-fbc2-4393-8999-19fbc283938f",
+      "previous_owner_account_id": null,
+      "previous_owner_account_id_state": "missing",
+      "user_id": "ffdfcc27-e12b-40ec-9fcc-27e12ba0ec41"
+    },
+    {
+      "note_id": "cf7f0729-f4e0-43d1-bf07-29f4e0f3d171",
+      "previous_owner_account_id": null,
+      "previous_owner_account_id_state": "missing",
+      "user_id": "ffdfcc27-e12b-40ec-9fcc-27e12ba0ec41"
+    },
+    {
+      "note_id": "4a741562-cf20-4630-b415-62cf20e63027",
+      "previous_owner_account_id": null,
+      "previous_owner_account_id_state": "missing",
+      "user_id": "2b6ed1ea-2600-41e0-aed1-ea2600a1e065"
+    },
+    {
+      "note_id": "d5a62e7b-115f-427f-a62e-7b115f827f59",
+      "previous_owner_account_id": null,
+      "previous_owner_account_id_state": "missing",
+      "user_id": "0e05fc21-d92c-4ceb-85fc-21d92c1ceb5f"
+    },
+    {
+      "note_id": "0e0b4389-f856-4f18-8b43-89f856ef1876",
+      "previous_owner_account_id": null,
+      "previous_owner_account_id_state": "missing",
+      "user_id": "2b6ed1ea-2600-41e0-aed1-ea2600a1e065"
+    }
+  ],
+  "eligible_profiles": [
+    {
+      "previous_owner_account_id": null,
+      "previous_owner_account_id_state": "missing",
+      "profile_id": "ffdfcc27-e12b-40ec-9fcc-27e12ba0ec41"
+    },
+    {
+      "previous_owner_account_id": null,
+      "previous_owner_account_id_state": "missing",
+      "profile_id": "5fe81669-e0cb-4cb8-a816-69e0cb6cb8a1"
+    },
+    {
+      "previous_owner_account_id": null,
+      "previous_owner_account_id_state": "missing",
+      "profile_id": "2b6ed1ea-2600-41e0-aed1-ea2600a1e065"
+    },
+    {
+      "previous_owner_account_id": null,
+      "previous_owner_account_id_state": "missing",
+      "profile_id": "40ea084d-222c-414c-aa08-4d222c514c17"
+    },
+    {
+      "previous_owner_account_id": null,
+      "previous_owner_account_id_state": "missing",
+      "profile_id": "0e05fc21-d92c-4ceb-85fc-21d92c1ceb5f"
+    }
+  ],
+  "migration_timestamp": "2026-08-27T18:05:19.294976+00:00",
+  "mode": "APPLY",
+  "target_account_id": "5ab329fa-8ddf-4e2e-993a-a50355ddd25d",
+  "target_username": "tahmid2016"
+}
