@@ -9,11 +9,15 @@ Username normalization is intentionally conservative:
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 import re
+import uuid
 
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerificationError, VerifyMismatchError
 from argon2.low_level import Type
+
+import db
 
 
 USERNAME_MIN_LENGTH = 3
@@ -35,6 +39,14 @@ class InvalidUsernameError(AuthValidationError):
 
 class InvalidPasswordError(AuthValidationError):
     """Raised when a password fails validation."""
+
+
+class AccountAlreadyExistsError(RuntimeError):
+    """Raised when a normalized username is already registered."""
+
+
+class AccountStorageError(RuntimeError):
+    """Raised when account persistence fails."""
 
 
 def normalize_username(username: str) -> str:
@@ -98,3 +110,41 @@ def verify_password(password: str, password_hash: str) -> bool:
         return bool(_PASSWORD_HASHER.verify(password_hash, password))
     except (VerifyMismatchError, VerificationError, InvalidHashError):
         return False
+
+
+def _is_duplicate_account_error(error: Exception) -> bool:
+    error_text = f"{type(error).__name__} {error}".casefold()
+    duplicate_markers = (
+        "duplicate",
+        "already exists",
+        "conflict",
+        "409",
+    )
+    return any(marker in error_text for marker in duplicate_markers)
+
+
+def create_account(username: str, password: str) -> dict[str, str]:
+    """Create a username/password account and return only safe account fields."""
+    normalized_username = validate_username(username)
+    validated_password = validate_password(password)
+    display_username = username.strip()
+    account_id = str(uuid.uuid4())
+    account_document = {
+        "_id": normalized_username,
+        "account_id": account_id,
+        "username": display_username,
+        "password_hash": hash_password(validated_password),
+        "created_at": datetime.now(timezone.utc),
+    }
+
+    try:
+        db.get_accounts_collection().insert_one(account_document)
+    except Exception as error:
+        if _is_duplicate_account_error(error):
+            raise AccountAlreadyExistsError("Username is already registered.") from error
+        raise AccountStorageError(f"Creating account failed ({type(error).__name__}).") from error
+
+    return {
+        "account_id": account_id,
+        "username": display_username,
+    }
