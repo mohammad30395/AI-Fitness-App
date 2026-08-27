@@ -971,6 +971,244 @@ def test_ask_ai_no_profile_guard_prevents_backend_call(monkeypatch):
     main.render_ask_ai_section()
 
 
+def test_two_account_logout_login_prevents_streamlit_state_leakage(monkeypatch):
+    fake_st = FakeStreamlit()
+    fake_st.private_ui_allowed = True
+    monkeypatch.setattr(main, "st", fake_st)
+
+    account_a_profile = {
+        "_id": "profile-a",
+        "name": "Account A Profile",
+        "goals": ["private-a-goal"],
+        "nutrition": {"calories": 2000, "protein": 120, "fat": 70, "carbs": 250},
+    }
+    account_b_profile = {
+        "_id": "profile-b",
+        "name": "Account B Profile",
+        "goals": ["private-b-goal"],
+        "nutrition": {"calories": 2100, "protein": 130, "fat": 75, "carbs": 260},
+    }
+
+    fake_st.session_state.update(
+        {
+            "authenticated": True,
+            "account_id": "account-a",
+            "username": "UserA",
+            "auth_session_id": "session-a",
+            "selected_profile_id": "profile-a",
+            "selected_profile": account_a_profile,
+            "profiles": [account_a_profile],
+            "nutrition": account_a_profile["nutrition"],
+            "nutrition_draft": {"calories": 1999},
+            "nutrition_draft_profile_id": "profile-a",
+            "notes": [{"_id": "note-a", "text": "ACCOUNT_A_PRIVATE_NOTE"}],
+            "notes_profile_id": "profile-a",
+            "last_ai_answer": "PRIVATE_A_AI_RESPONSE",
+            "confirm_delete_note_id": "note-a",
+            "create_profile_form_name": "Account A Profile",
+            "ask_ai_error": "Account A private error",
+        }
+    )
+
+    fake_st.button_values = {"Logout": True}
+    try:
+        main._render_authenticated_header()
+    except RerunCalled:
+        pass
+    else:
+        raise AssertionError("logout should trigger rerun")
+
+    assert fake_st.session_state == {
+        "authenticated": False,
+        "account_id": None,
+        "username": None,
+        "auth_session_id": None,
+    }
+    for account_a_key in (
+        "selected_profile_id",
+        "selected_profile",
+        "profiles",
+        "nutrition",
+        "nutrition_draft",
+        "nutrition_draft_profile_id",
+        "notes",
+        "notes_profile_id",
+        "last_ai_answer",
+        "confirm_delete_note_id",
+        "create_profile_form_name",
+        "ask_ai_error",
+    ):
+        assert account_a_key not in fake_st.session_state
+
+    profile_calls = []
+    note_calls = []
+    ai_calls = []
+    update_calls = []
+
+    def fail_profile_call(*args, **kwargs):
+        profile_calls.append((args, kwargs))
+        raise AssertionError("profile calls must not run while unauthenticated")
+
+    def fail_note_call(*args, **kwargs):
+        note_calls.append((args, kwargs))
+        raise AssertionError("note calls must not run while unauthenticated")
+
+    def fail_ai_call(*args, **kwargs):
+        ai_calls.append((args, kwargs))
+        raise AssertionError("Ask AI must not run while unauthenticated")
+
+    monkeypatch.setattr(main.profiles, "get_all_profiles", fail_profile_call)
+    monkeypatch.setattr(main.db, "list_notes", fail_note_call)
+    monkeypatch.setattr(main.ai, "ask_ai", fail_ai_call)
+    fake_st.private_ui_allowed = False
+    fake_st.submit_value = False
+    fake_st.button_values = {}
+    try:
+        main.main()
+    except StopCalled:
+        pass
+    else:
+        raise AssertionError("unauthenticated transition should stop before private work")
+
+    assert profile_calls == []
+    assert note_calls == []
+    assert ai_calls == []
+
+    fake_st.private_ui_allowed = True
+    fake_st.submit_value = True
+    fake_st.input_values = {"Username": "UserB", "Password": "login-password-b"}
+
+    def fake_authenticate(username, password):
+        assert (username, password) == ("UserB", "login-password-b")
+        return {"account_id": "account-b", "username": "UserB"}
+
+    monkeypatch.setattr(main.auth, "authenticate", fake_authenticate)
+
+    try:
+        main._render_login_form()
+    except RerunCalled:
+        pass
+    else:
+        raise AssertionError("Account B login should trigger rerun")
+
+    account_b_session_id = fake_st.session_state["auth_session_id"]
+    assert fake_st.session_state["authenticated"] is True
+    assert fake_st.session_state["account_id"] == "account-b"
+    assert fake_st.session_state["username"] == "UserB"
+    assert account_b_session_id
+    assert account_b_session_id != "session-a"
+    assert "PRIVATE_A_AI_RESPONSE" not in str(fake_st.session_state)
+
+    profile_calls.clear()
+
+    def fake_get_all_profiles(account_id):
+        profile_calls.append(("list", account_id))
+        return [account_b_profile]
+
+    def fake_get_profile_by_id(account_id, profile_id):
+        profile_calls.append(("read", account_id, profile_id))
+        return account_b_profile
+
+    monkeypatch.setattr(main.profiles, "get_all_profiles", fake_get_all_profiles)
+    monkeypatch.setattr(main.profiles, "get_profile_by_id", fake_get_profile_by_id)
+    fake_st.session_state["selected_profile_id"] = "profile-a"
+
+    assert main._refresh_profiles() is True
+
+    assert profile_calls == [
+        ("list", "account-b"),
+        ("read", "account-b", "profile-b"),
+    ]
+    assert fake_st.session_state["profiles"] == [account_b_profile]
+    assert fake_st.session_state["selected_profile_id"] == "profile-b"
+    assert fake_st.session_state["selected_profile"] == account_b_profile
+    assert "profile-a" not in str(fake_st.session_state)
+
+    note_calls.clear()
+
+    def fake_list_notes(account_id, profile_id, limit=50):
+        note_calls.append(("list", account_id, profile_id, limit))
+        return [{"_id": "note-b", "text": "ACCOUNT_B_PRIVATE_NOTE"}]
+
+    monkeypatch.setattr(main.db, "list_notes", fake_list_notes)
+
+    assert main._refresh_notes("profile-b") is True
+
+    assert note_calls == [("list", "account-b", "profile-b", 50)]
+    assert fake_st.session_state["notes"] == [{"_id": "note-b", "text": "ACCOUNT_B_PRIVATE_NOTE"}]
+    assert fake_st.session_state["notes_profile_id"] == "profile-b"
+    assert "note-a" not in str(fake_st.session_state)
+    assert "ACCOUNT_A_PRIVATE_NOTE" not in str(fake_st.session_state)
+
+    monkeypatch.setattr(
+        main.profiles,
+        "build_profile_context",
+        lambda profile: "Account B profile context",
+    )
+
+    def fake_ask_ai(question, profile_context, account_id, profile_id, session_id=None):
+        ai_calls.append((question, profile_context, account_id, profile_id, session_id))
+        return "ACCOUNT_B_AI_RESPONSE"
+
+    monkeypatch.setattr(main.ai, "ask_ai", fake_ask_ai)
+    fake_st.input_values = {"Question": "What should I do next week?"}
+
+    try:
+        main.render_ask_ai_section()
+    except RerunCalled:
+        pass
+    else:
+        raise AssertionError("Account B Ask AI should trigger rerun")
+
+    assert ai_calls == [
+        (
+            "What should I do next week?",
+            "Account B profile context",
+            "account-b",
+            "profile-b",
+            account_b_session_id,
+        )
+    ]
+    assert fake_st.session_state["last_ai_answer"] == "ACCOUNT_B_AI_RESPONSE"
+    assert "PRIVATE_A_AI_RESPONSE" not in str(fake_st.session_state)
+
+    fake_st.input_values = {
+        "Calories (kcal/day)": 2200.0,
+        "Protein (g/day)": 140.0,
+        "Fat (g/day)": 80.0,
+        "Carbs (g/day)": 270.0,
+    }
+
+    def fake_save_profile_changes(account_id, profile_id, **updates):
+        update_calls.append((account_id, profile_id, updates))
+        return {"_id": profile_id, "goals": [], "nutrition": updates["nutrition"]}
+
+    monkeypatch.setattr(main.profiles, "save_profile_changes", fake_save_profile_changes)
+    monkeypatch.setattr(main, "_refresh_profiles", lambda select_profile_id=None: True)
+
+    try:
+        main.render_nutrition_section()
+    except RerunCalled:
+        pass
+    else:
+        raise AssertionError("Account B nutrition save should trigger rerun")
+
+    assert update_calls == [
+        (
+            "account-b",
+            "profile-b",
+            {
+                "nutrition": {
+                    "calories": 2200.0,
+                    "protein": 140.0,
+                    "fat": 80.0,
+                    "carbs": 270.0,
+                }
+            },
+        )
+    ]
+
+
 def test_duplicate_create_account_error_is_safe(monkeypatch):
     fake_st = FakeStreamlit()
     fake_st.submit_value = True
