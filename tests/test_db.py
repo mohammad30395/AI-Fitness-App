@@ -5,6 +5,10 @@ import pytest
 import db
 
 
+ACCOUNT_A = "account-a"
+ACCOUNT_B = "account-b"
+
+
 def valid_profile(**overrides):
     profile = {
         "name": "Ada Lovelace",
@@ -21,6 +25,14 @@ def valid_profile(**overrides):
             "carbs": 220,
         },
     }
+    profile.update(overrides)
+    return profile
+
+
+def profile_document(profile_id, owner_account_id, **overrides):
+    profile = valid_profile(_id=profile_id)
+    if owner_account_id is not None:
+        profile["owner_account_id"] = owner_account_id
     profile.update(overrides)
     return profile
 
@@ -163,23 +175,50 @@ def test_get_accounts_collection_uses_configured_collection(monkeypatch):
     assert calls == [values["ASTRA_ACCOUNTS_COLLECTION"]]
 
 
-def test_list_profiles_returns_plain_dicts(monkeypatch):
+def test_list_profiles_returns_only_profiles_owned_by_account(monkeypatch):
+    documents = [
+        profile_document("profile-a", ACCOUNT_A, name="Ada"),
+        profile_document("profile-b", ACCOUNT_B, name="Grace"),
+        profile_document("legacy-profile", None, name="Legacy"),
+    ]
+    filters = []
+
     class FakeCollection:
         def find(self, filter_doc):
-            assert filter_doc == {}
+            filters.append(dict(filter_doc))
+            assert "owner_account_id" in filter_doc
             return iter(
-                [
-                    {"_id": "one", "name": "Ada"},
-                    {"_id": "two", "name": "Grace"},
-                ]
+                document
+                for document in documents
+                if document.get("owner_account_id") == filter_doc["owner_account_id"]
             )
 
     monkeypatch.setattr(db, "get_personal_collection", lambda: FakeCollection())
 
-    assert db.list_profiles() == [
-        {"_id": "one", "name": "Ada"},
-        {"_id": "two", "name": "Grace"},
+    account_a_profiles = db.list_profiles(ACCOUNT_A)
+    account_b_profiles = db.list_profiles(ACCOUNT_B)
+
+    assert [profile["_id"] for profile in account_a_profiles] == ["profile-a"]
+    assert [profile["_id"] for profile in account_b_profiles] == ["profile-b"]
+    assert "profile-b" not in [profile["_id"] for profile in account_a_profiles]
+    assert "profile-a" not in [profile["_id"] for profile in account_b_profiles]
+    assert "legacy-profile" not in [profile["_id"] for profile in account_a_profiles]
+    assert filters == [
+        {"owner_account_id": ACCOUNT_A},
+        {"owner_account_id": ACCOUNT_B},
     ]
+
+
+@pytest.mark.parametrize("account_id", ["", "   ", None])
+def test_list_profiles_rejects_blank_or_invalid_account_id(monkeypatch, account_id):
+    class FakeCollection:
+        def find(self, filter_doc):
+            raise AssertionError("database must not be called for invalid account_id")
+
+    monkeypatch.setattr(db, "get_personal_collection", lambda: FakeCollection())
+
+    with pytest.raises(db.InvalidProfileError):
+        db.list_profiles(account_id)
 
 
 def test_list_profiles_wraps_read_errors_without_secret(monkeypatch):
@@ -192,7 +231,7 @@ def test_list_profiles_wraps_read_errors_without_secret(monkeypatch):
     monkeypatch.setattr(db, "get_personal_collection", lambda: FakeCollection())
 
     with pytest.raises(db.DatabaseConnectionError) as exc_info:
-        db.list_profiles()
+        db.list_profiles(ACCOUNT_A)
 
     message = str(exc_info.value)
     assert "Listing profiles failed" in message
@@ -200,18 +239,58 @@ def test_list_profiles_wraps_read_errors_without_secret(monkeypatch):
     assert "AstraCS:<redacted>" in message
 
 
-def test_get_profile_returns_document_or_raises_not_found(monkeypatch):
+def test_get_profile_returns_only_profile_owned_by_account(monkeypatch):
+    documents = [
+        profile_document("profile-a", ACCOUNT_A, name="Ada"),
+        profile_document("profile-b", ACCOUNT_B, name="Grace"),
+        profile_document("legacy-profile", None, name="Legacy"),
+    ]
+    filters = []
+
     class FakeCollection:
         def find_one(self, filter_doc):
-            if filter_doc == {"_id": "profile-1"}:
-                return {"_id": "profile-1", "name": "Ada"}
+            filters.append(dict(filter_doc))
+            assert "owner_account_id" in filter_doc
+            for document in documents:
+                if (
+                    document["_id"] == filter_doc["_id"]
+                    and document.get("owner_account_id") == filter_doc["owner_account_id"]
+                ):
+                    return dict(document)
             return None
 
     monkeypatch.setattr(db, "get_personal_collection", lambda: FakeCollection())
 
-    assert db.get_profile("profile-1") == {"_id": "profile-1", "name": "Ada"}
+    assert db.get_profile(ACCOUNT_A, "profile-a")["_id"] == "profile-a"
+    assert filters[-1] == {"_id": "profile-a", "owner_account_id": ACCOUNT_A}
+
     with pytest.raises(db.ProfileNotFoundError):
-        db.get_profile("missing")
+        db.get_profile(ACCOUNT_B, "profile-a")
+    with pytest.raises(db.ProfileNotFoundError):
+        db.get_profile(ACCOUNT_A, "profile-b")
+    with pytest.raises(db.ProfileNotFoundError):
+        db.get_profile(ACCOUNT_A, "legacy-profile")
+
+    with pytest.raises(db.ProfileNotFoundError) as missing_profile:
+        db.get_profile(ACCOUNT_A, "missing")
+    with pytest.raises(db.ProfileNotFoundError) as foreign_profile:
+        db.get_profile(ACCOUNT_B, "profile-a")
+
+    assert type(missing_profile.value) is type(foreign_profile.value)
+    assert "Profile not found" in str(missing_profile.value)
+    assert "Profile not found" in str(foreign_profile.value)
+
+
+@pytest.mark.parametrize("account_id", ["", "   ", None])
+def test_get_profile_rejects_blank_or_invalid_account_id(monkeypatch, account_id):
+    class FakeCollection:
+        def find_one(self, filter_doc):
+            raise AssertionError("database must not be called for invalid account_id")
+
+    monkeypatch.setattr(db, "get_personal_collection", lambda: FakeCollection())
+
+    with pytest.raises(db.InvalidProfileError):
+        db.get_profile(account_id, "profile-1")
 
 
 def test_create_profile_validates_and_returns_inserted_id(monkeypatch):

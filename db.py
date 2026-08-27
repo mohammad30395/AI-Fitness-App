@@ -194,6 +194,12 @@ def _inserted_id(insert_result: Any) -> Any:
     return insert_result
 
 
+def _validate_account_id(account_id: Any) -> str:
+    if not isinstance(account_id, str) or not account_id.strip():
+        raise InvalidProfileError("account_id must be a non-empty string")
+    return account_id.strip()
+
+
 def _validate_user_id(user_id: Any) -> str:
     if not isinstance(user_id, str) or not user_id.strip():
         raise InvalidNoteError("user_id must be a non-empty string")
@@ -279,24 +285,33 @@ def get_accounts_collection():
         raise _wrap_database_error("Opening accounts collection", error) from error
 
 
-def list_profiles() -> list[dict[str, Any]]:
+def list_profiles(account_id: Any) -> list[dict[str, Any]]:
+    validated_account_id = _validate_account_id(account_id)
     try:
-        return [_normalize_document(document) for document in get_personal_collection().find({})]
+        return [
+            _normalize_document(document)
+            for document in get_personal_collection().find(
+                {"owner_account_id": validated_account_id}
+            )
+        ]
     except EXPECTED_APPLICATION_ERRORS:
         raise
     except Exception as error:
         raise _wrap_database_error("Listing profiles", error) from error
 
 
-def get_profile(profile_id: Any) -> dict[str, Any]:
+def get_profile(account_id: Any, profile_id: Any) -> dict[str, Any]:
+    validated_account_id = _validate_account_id(account_id)
     if not profile_id:
         raise InvalidProfileError("profile_id is required")
 
     try:
-        document = get_personal_collection().find_one({"_id": profile_id})
+        document = get_personal_collection().find_one(
+            {"_id": profile_id, "owner_account_id": validated_account_id}
+        )
         normalized = _normalize_document(document)
         if normalized is None:
-            raise ProfileNotFoundError(f"Profile not found: {profile_id}")
+            raise ProfileNotFoundError("Profile not found.")
         return normalized
     except EXPECTED_APPLICATION_ERRORS:
         raise

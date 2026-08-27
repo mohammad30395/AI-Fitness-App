@@ -47,12 +47,12 @@ def normalize_profile(profile: dict[str, Any]) -> dict[str, Any]:
     return normalized
 
 
-def get_all_profiles() -> list[dict[str, Any]]:
-    return [normalize_profile(profile) for profile in db.list_profiles()]
+def get_all_profiles(account_id: Any) -> list[dict[str, Any]]:
+    return [normalize_profile(profile) for profile in db.list_profiles(account_id)]
 
 
-def get_profile_by_id(profile_id: Any) -> dict[str, Any]:
-    return normalize_profile(db.get_profile(profile_id))
+def get_profile_by_id(account_id: Any, profile_id: Any) -> dict[str, Any]:
+    return normalize_profile(db.get_profile(account_id, profile_id))
 
 
 def create_new_profile(

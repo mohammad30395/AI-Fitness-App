@@ -4,6 +4,9 @@ import profiles
 from utils import dict_to_string
 
 
+ACCOUNT_ID = "account-a"
+
+
 def raw_profile(**overrides):
     profile = {
         "_id": "profile-1",
@@ -93,25 +96,39 @@ def test_build_profile_context_marks_missing_nutrition_as_not_generated():
 
 
 def test_get_all_profiles_normalizes_db_results(monkeypatch):
+    calls = []
+
+    def fake_list_profiles(account_id):
+        calls.append(account_id)
+        return [
+            raw_profile(_id="profile-1"),
+            raw_profile(_id="profile-2", nutrition=None),
+        ]
+
     monkeypatch.setattr(
         profiles.db,
         "list_profiles",
-        lambda: [
-            raw_profile(_id="profile-1"),
-            raw_profile(_id="profile-2", nutrition=None),
-        ],
+        fake_list_profiles,
     )
 
-    result = profiles.get_all_profiles()
+    result = profiles.get_all_profiles(ACCOUNT_ID)
 
+    assert calls == [ACCOUNT_ID]
     assert [profile["_id"] for profile in result] == ["profile-1", "profile-2"]
     assert "nutrition" not in result[1]
 
 
 def test_get_profile_by_id_normalizes_db_result(monkeypatch):
-    monkeypatch.setattr(profiles.db, "get_profile", lambda profile_id: raw_profile(_id=profile_id))
+    calls = []
 
-    assert profiles.get_profile_by_id("profile-1")["_id"] == "profile-1"
+    def fake_get_profile(account_id, profile_id):
+        calls.append((account_id, profile_id))
+        return raw_profile(_id=profile_id)
+
+    monkeypatch.setattr(profiles.db, "get_profile", fake_get_profile)
+
+    assert profiles.get_profile_by_id(ACCOUNT_ID, "profile-1")["_id"] == "profile-1"
+    assert calls == [(ACCOUNT_ID, "profile-1")]
 
 
 def test_create_new_profile_preserves_goals_list_and_optional_nutrition(monkeypatch):
