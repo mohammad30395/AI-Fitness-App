@@ -1,9 +1,11 @@
 import logging
 import re
+import uuid
 
 import streamlit as st
 
 import ai
+import auth
 import config
 import db
 import profiles
@@ -98,11 +100,44 @@ def _reset_session_for_logout() -> None:
     _initialize_auth_session_state()
 
 
+def _render_create_account_form() -> None:
+    st.header("Create Account")
+    with st.form("create_account_form"):
+        username = st.text_input("Username")
+        password = st.text_input("Password", type="password")
+        confirm_password = st.text_input("Confirm Password", type="password")
+        submitted = st.form_submit_button("Create Account", type="primary")
+
+    if not submitted:
+        return
+
+    if password != confirm_password:
+        st.error("Passwords do not match.")
+        return
+
+    try:
+        account = auth.create_account(username, password)
+    except auth.AccountAlreadyExistsError:
+        st.error("That username is already in use.")
+    except auth.AuthValidationError as error:
+        st.error(str(error))
+    except Exception as error:
+        _record_ui_failure("Creating account", error)
+        st.error("Unable to create account right now.")
+    else:
+        st.session_state["authenticated"] = True
+        st.session_state["account_id"] = account["account_id"]
+        st.session_state["username"] = account["username"]
+        st.session_state["auth_session_id"] = str(uuid.uuid4())
+        st.rerun()
+
+
 def _enforce_authentication_gate() -> None:
     if _is_authenticated_session():
         return
 
-    st.info("Authentication required. Login and account creation will be added in the next milestone.")
+    st.info("Authentication required.")
+    _render_create_account_form()
     st.stop()
 
 

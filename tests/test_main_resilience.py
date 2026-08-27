@@ -9,11 +9,30 @@ class StopCalled(Exception):
     pass
 
 
+class RerunCalled(Exception):
+    pass
+
+
+class FakeForm:
+    def __init__(self, fake_st):
+        self.fake_st = fake_st
+
+    def __enter__(self):
+        return self.fake_st
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+
 class FakeStreamlit:
     def __init__(self):
         self.session_state = FakeSessionState()
         self.info_messages = []
+        self.error_messages = []
         self.page_config = None
+        self.input_values = {}
+        self.submit_value = False
+        self.headers = []
 
     def set_page_config(self, **kwargs):
         self.page_config = kwargs
@@ -21,8 +40,26 @@ class FakeStreamlit:
     def info(self, message):
         self.info_messages.append(message)
 
+    def error(self, message):
+        self.error_messages.append(message)
+
+    def header(self, message):
+        self.headers.append(message)
+
+    def form(self, key):
+        return FakeForm(self)
+
+    def text_input(self, label, **kwargs):
+        return self.input_values.get(label, "")
+
+    def form_submit_button(self, label, **kwargs):
+        return self.submit_value
+
     def stop(self):
         raise StopCalled
+
+    def rerun(self):
+        raise RerunCalled
 
     def title(self, *args, **kwargs):
         raise AssertionError("private UI must not render before authentication")
@@ -153,7 +190,7 @@ def test_unauthenticated_main_stops_before_private_work(monkeypatch):
         "layout": "wide",
     }
     assert fake_st.info_messages == [
-        "Authentication required. Login and account creation will be added in the next milestone."
+        "Authentication required."
     ]
     assert fake_st.session_state == {
         "authenticated": False,
@@ -161,6 +198,159 @@ def test_unauthenticated_main_stops_before_private_work(monkeypatch):
         "username": None,
         "auth_session_id": None,
     }
+
+
+def test_create_account_password_mismatch_does_not_call_backend(monkeypatch):
+    fake_st = FakeStreamlit()
+    fake_st.submit_value = True
+    fake_st.input_values = {
+        "Username": "TestUser",
+        "Password": "long-password-1",
+        "Confirm Password": "different-password",
+    }
+    monkeypatch.setattr(main, "st", fake_st)
+
+    def fail_create_account(username, password):
+        raise AssertionError("create_account must not be called when passwords differ")
+
+    monkeypatch.setattr(main.auth, "create_account", fail_create_account)
+
+    main._initialize_auth_session_state()
+    main._render_create_account_form()
+
+    assert fake_st.error_messages == ["Passwords do not match."]
+    assert fake_st.session_state["authenticated"] is False
+    assert fake_st.session_state["account_id"] is None
+    assert fake_st.session_state["username"] is None
+    assert fake_st.session_state["auth_session_id"] is None
+
+
+def test_create_account_calls_backend_without_confirm_password(monkeypatch):
+    fake_st = FakeStreamlit()
+    fake_st.submit_value = True
+    fake_st.input_values = {
+        "Username": "TestUser",
+        "Password": "long-password-1",
+        "Confirm Password": "long-password-1",
+    }
+    monkeypatch.setattr(main, "st", fake_st)
+    calls = []
+
+    def fake_create_account(username, password):
+        calls.append((username, password))
+        return {"account_id": "account-test-id", "username": "TestUser"}
+
+    monkeypatch.setattr(main.auth, "create_account", fake_create_account)
+
+    main._initialize_auth_session_state()
+    try:
+        main._render_create_account_form()
+    except RerunCalled:
+        pass
+    else:
+        raise AssertionError("successful account creation should trigger rerun")
+
+    assert calls == [("TestUser", "long-password-1")]
+
+
+def test_successful_create_account_establishes_trusted_session(monkeypatch):
+    fake_st = FakeStreamlit()
+    fake_st.submit_value = True
+    fake_st.input_values = {
+        "Username": "TestUser",
+        "Password": "long-password-1",
+        "Confirm Password": "long-password-1",
+    }
+    monkeypatch.setattr(main, "st", fake_st)
+    monkeypatch.setattr(
+        main.auth,
+        "create_account",
+        lambda username, password: {"account_id": "account-test-id", "username": "TestUser"},
+    )
+
+    main._initialize_auth_session_state()
+    try:
+        main._render_create_account_form()
+    except RerunCalled:
+        pass
+    else:
+        raise AssertionError("successful account creation should trigger rerun")
+
+    assert fake_st.session_state["authenticated"] is True
+    assert fake_st.session_state["account_id"] == "account-test-id"
+    assert fake_st.session_state["username"] == "TestUser"
+    assert isinstance(fake_st.session_state["auth_session_id"], str)
+    assert fake_st.session_state["auth_session_id"]
+
+
+def test_duplicate_create_account_error_is_safe(monkeypatch):
+    fake_st = FakeStreamlit()
+    fake_st.submit_value = True
+    fake_st.input_values = {
+        "Username": "TestUser",
+        "Password": "long-password-1",
+        "Confirm Password": "long-password-1",
+    }
+    monkeypatch.setattr(main, "st", fake_st)
+
+    def fake_create_account(username, password):
+        raise main.auth.AccountAlreadyExistsError("raw duplicate database detail")
+
+    monkeypatch.setattr(main.auth, "create_account", fake_create_account)
+
+    main._initialize_auth_session_state()
+    main._render_create_account_form()
+
+    assert fake_st.error_messages == ["That username is already in use."]
+    assert fake_st.session_state["authenticated"] is False
+    assert fake_st.session_state["account_id"] is None
+
+
+def test_create_account_validation_error_uses_auth_message(monkeypatch):
+    fake_st = FakeStreamlit()
+    fake_st.submit_value = True
+    fake_st.input_values = {
+        "Username": "no",
+        "Password": "long-password-1",
+        "Confirm Password": "long-password-1",
+    }
+    monkeypatch.setattr(main, "st", fake_st)
+
+    def fake_create_account(username, password):
+        raise main.auth.InvalidUsernameError("Username must be 3 to 32 characters.")
+
+    monkeypatch.setattr(main.auth, "create_account", fake_create_account)
+
+    main._initialize_auth_session_state()
+    main._render_create_account_form()
+
+    assert fake_st.error_messages == ["Username must be 3 to 32 characters."]
+    assert fake_st.session_state["authenticated"] is False
+
+
+def test_create_account_unexpected_error_is_generic(monkeypatch):
+    fake_st = FakeStreamlit()
+    fake_st.submit_value = True
+    fake_st.input_values = {
+        "Username": "TestUser",
+        "Password": "long-password-1",
+        "Confirm Password": "long-password-1",
+    }
+    monkeypatch.setattr(main, "st", fake_st)
+
+    def fake_create_account(username, password):
+        raise RuntimeError("AstraCS:super-secret-token password_hash private detail")
+
+    monkeypatch.setattr(main.auth, "create_account", fake_create_account)
+
+    main._initialize_auth_session_state()
+    main._render_create_account_form()
+
+    assert fake_st.error_messages == ["Unable to create account right now."]
+    assert "AstraCS" not in fake_st.error_messages[0]
+    assert "password_hash" not in fake_st.error_messages[0]
+    assert fake_st.session_state["authenticated"] is False
+    assert fake_st.session_state["account_id"] is None
 
 
 def test_ui_diagnostic_sanitizer_redacts_known_secret_values(monkeypatch):
