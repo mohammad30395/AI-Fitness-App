@@ -136,10 +136,11 @@ def test_create_new_profile_preserves_goals_list_and_optional_nutrition(monkeypa
     monkeypatch.setattr(
         profiles.db,
         "create_profile",
-        lambda profile_data: calls.append(profile_data) or "profile-1",
+        lambda account_id, profile_data: calls.append((account_id, profile_data)) or "profile-1",
     )
 
     inserted_id = profiles.create_new_profile(
+        account_id=ACCOUNT_ID,
         name="Ada Lovelace",
         age=31,
         weight=64.5,
@@ -151,16 +152,81 @@ def test_create_new_profile_preserves_goals_list_and_optional_nutrition(monkeypa
 
     assert inserted_id == "profile-1"
     assert calls == [
-        {
-            "name": "Ada Lovelace",
-            "age": 31,
-            "weight": 64.5,
-            "height": 170,
-            "gender": "female",
-            "activity_level": "moderate",
-            "goals": ["strength", "mobility"],
-        }
+        (
+            ACCOUNT_ID,
+            {
+                "name": "Ada Lovelace",
+                "age": 31,
+                "weight": 64.5,
+                "height": 170,
+                "gender": "female",
+                "activity_level": "moderate",
+                "goals": ["strength", "mobility"],
+            },
+        )
     ]
+
+
+def test_create_new_profile_preserves_nutrition_behavior(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        profiles.db,
+        "create_profile",
+        lambda account_id, profile_data: calls.append((account_id, profile_data)) or "profile-1",
+    )
+
+    inserted_id = profiles.create_new_profile(
+        account_id=ACCOUNT_ID,
+        name="Ada Lovelace",
+        age=31,
+        weight=64.5,
+        height=170,
+        gender="female",
+        activity_level="moderate",
+        goals=["strength"],
+        nutrition={
+            "carbs": 220,
+            "fat": 70,
+            "protein": 140,
+            "calories": 2100,
+            "ignored": "not persisted",
+        },
+    )
+
+    assert inserted_id == "profile-1"
+    assert calls == [
+        (
+            ACCOUNT_ID,
+            {
+                "name": "Ada Lovelace",
+                "age": 31,
+                "weight": 64.5,
+                "height": 170,
+                "gender": "female",
+                "activity_level": "moderate",
+                "goals": ["strength"],
+                "nutrition": {
+                    "calories": 2100,
+                    "protein": 140,
+                    "fat": 70,
+                    "carbs": 220,
+                },
+            },
+        )
+    ]
+
+
+def test_create_new_profile_requires_account_id():
+    with pytest.raises(TypeError):
+        profiles.create_new_profile(
+            name="Ada Lovelace",
+            age=31,
+            weight=64.5,
+            height=170,
+            gender="female",
+            activity_level="moderate",
+            goals=["strength"],
+        )
 
 
 def test_save_profile_changes_normalizes_updated_profile(monkeypatch):

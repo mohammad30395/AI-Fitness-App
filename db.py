@@ -319,8 +319,10 @@ def get_profile(account_id: Any, profile_id: Any) -> dict[str, Any]:
         raise _wrap_database_error("Loading profile", error) from error
 
 
-def create_profile(profile_data: dict[str, Any]) -> Any:
+def create_profile(account_id: Any, profile_data: dict[str, Any]) -> Any:
+    validated_account_id = _validate_account_id(account_id)
     document = _validate_profile_fields(profile_data, partial=False)
+    document["owner_account_id"] = validated_account_id
     try:
         result = get_personal_collection().insert_one(document)
         return _inserted_id(result)

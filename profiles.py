@@ -57,6 +57,7 @@ def get_profile_by_id(account_id: Any, profile_id: Any) -> dict[str, Any]:
 
 def create_new_profile(
     *,
+    account_id: Any,
     name: str,
     age: int,
     weight: float,
@@ -77,7 +78,7 @@ def create_new_profile(
     }
     if nutrition:
         profile_data["nutrition"] = _normalize_nutrition(nutrition)
-    return db.create_profile(profile_data)
+    return db.create_profile(account_id, profile_data)
 
 
 def save_profile_changes(profile_id: Any, **updates: Any) -> dict[str, Any]:

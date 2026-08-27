@@ -293,7 +293,7 @@ def test_get_profile_rejects_blank_or_invalid_account_id(monkeypatch, account_id
         db.get_profile(account_id, "profile-1")
 
 
-def test_create_profile_validates_and_returns_inserted_id(monkeypatch):
+def test_create_profile_assigns_trusted_owner_and_returns_inserted_id(monkeypatch):
     calls = []
 
     class FakeCollection:
@@ -303,11 +303,53 @@ def test_create_profile_validates_and_returns_inserted_id(monkeypatch):
 
     monkeypatch.setattr(db, "get_personal_collection", lambda: FakeCollection())
 
-    inserted_id = db.create_profile(valid_profile(name="  Ada Lovelace  "))
+    inserted_id = db.create_profile(ACCOUNT_A, valid_profile(name="  Ada Lovelace  "))
 
     assert inserted_id == "generated-id"
     assert calls[0]["name"] == "Ada Lovelace"
+    assert calls[0]["owner_account_id"] == ACCOUNT_A
     assert "_id" not in calls[0]
+
+
+def test_create_profile_uses_supplied_account_id_for_each_account(monkeypatch):
+    calls = []
+
+    class FakeCollection:
+        def insert_one(self, document):
+            calls.append(document)
+            return SimpleNamespace(inserted_id=f"profile-{len(calls)}")
+
+    monkeypatch.setattr(db, "get_personal_collection", lambda: FakeCollection())
+
+    db.create_profile(ACCOUNT_A, valid_profile(name="Account A Profile"))
+    db.create_profile(ACCOUNT_B, valid_profile(name="Account B Profile"))
+
+    assert calls[0]["owner_account_id"] == ACCOUNT_A
+    assert calls[1]["owner_account_id"] == ACCOUNT_B
+    assert calls[0]["owner_account_id"] != calls[1]["owner_account_id"]
+
+
+@pytest.mark.parametrize("account_id", ["", "   ", None])
+def test_create_profile_rejects_blank_or_invalid_account_id(monkeypatch, account_id):
+    class FakeCollection:
+        def insert_one(self, document):
+            raise AssertionError("insert_one must not be called for invalid account_id")
+
+    monkeypatch.setattr(db, "get_personal_collection", lambda: FakeCollection())
+
+    with pytest.raises(db.InvalidProfileError):
+        db.create_profile(account_id, valid_profile())
+
+
+def test_create_profile_rejects_forged_owner_account_id(monkeypatch):
+    class FakeCollection:
+        def insert_one(self, document):
+            raise AssertionError("insert_one must not be called for forged owner")
+
+    monkeypatch.setattr(db, "get_personal_collection", lambda: FakeCollection())
+
+    with pytest.raises(db.InvalidProfileError):
+        db.create_profile(ACCOUNT_A, valid_profile(owner_account_id=ACCOUNT_B))
 
 
 @pytest.mark.parametrize(
@@ -337,12 +379,12 @@ def test_create_profile_rejects_invalid_profile_input(monkeypatch, field, value)
     monkeypatch.setattr(db, "get_personal_collection", lambda: FakeCollection())
 
     with pytest.raises(db.InvalidProfileError):
-        db.create_profile(valid_profile(**{field: value}))
+        db.create_profile(ACCOUNT_A, valid_profile(**{field: value}))
 
 
 def test_create_profile_rejects_application_supplied_id(monkeypatch):
     with pytest.raises(db.InvalidProfileError):
-        db.create_profile(valid_profile(_id="client-generated-id"))
+        db.create_profile(ACCOUNT_A, valid_profile(_id="client-generated-id"))
 
 
 def test_update_rejects_id_and_empty_updates_before_calling_database(monkeypatch):
