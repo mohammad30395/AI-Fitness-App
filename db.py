@@ -332,7 +332,12 @@ def create_profile(account_id: Any, profile_data: dict[str, Any]) -> Any:
         raise _wrap_database_error("Creating profile", error) from error
 
 
-def update_personal_information(profile_id: Any, updates: dict[str, Any]) -> dict[str, Any]:
+def update_personal_information(
+    account_id: Any,
+    profile_id: Any,
+    updates: dict[str, Any],
+) -> dict[str, Any]:
+    validated_account_id = _validate_account_id(account_id)
     if not profile_id:
         raise InvalidProfileError("profile_id is required")
 
@@ -342,16 +347,17 @@ def update_personal_information(profile_id: Any, updates: dict[str, Any]) -> dic
 
     try:
         collection = get_personal_collection()
-        existing = collection.find_one({"_id": profile_id})
+        profile_filter = {"_id": profile_id, "owner_account_id": validated_account_id}
+        existing = collection.find_one(profile_filter)
         if existing is None:
-            raise ProfileNotFoundError(f"Profile not found: {profile_id}")
+            raise ProfileNotFoundError("Profile not found.")
 
-        collection.update_one({"_id": profile_id}, {"$set": update_document}, upsert=False)
+        collection.update_one(profile_filter, {"$set": update_document}, upsert=False)
 
-        updated = collection.find_one({"_id": profile_id})
+        updated = collection.find_one(profile_filter)
         normalized = _normalize_document(updated)
         if normalized is None:
-            raise ProfileNotFoundError(f"Profile not found after update: {profile_id}")
+            raise ProfileNotFoundError("Profile not found.")
         return normalized
     except EXPECTED_APPLICATION_ERRORS:
         raise

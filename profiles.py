@@ -81,9 +81,9 @@ def create_new_profile(
     return db.create_profile(account_id, profile_data)
 
 
-def save_profile_changes(profile_id: Any, **updates: Any) -> dict[str, Any]:
+def save_profile_changes(account_id: Any, profile_id: Any, **updates: Any) -> dict[str, Any]:
     cleaned_updates = _clean_profile_updates(updates)
-    return normalize_profile(db.update_personal_information(profile_id, cleaned_updates))
+    return normalize_profile(db.update_personal_information(account_id, profile_id, cleaned_updates))
 
 
 def build_profile_context(profile: dict[str, Any]) -> str:

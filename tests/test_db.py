@@ -37,6 +37,35 @@ def profile_document(profile_id, owner_account_id, **overrides):
     return profile
 
 
+class FakeOwnedProfilesCollection:
+    def __init__(self, documents):
+        self.documents = [dict(document) for document in documents]
+        self.calls = []
+
+    def find_one(self, filter_doc):
+        self.calls.append(("find_one", dict(filter_doc)))
+        assert set(filter_doc) == {"_id", "owner_account_id"}
+        for document in self.documents:
+            if (
+                document["_id"] == filter_doc["_id"]
+                and document.get("owner_account_id") == filter_doc["owner_account_id"]
+            ):
+                return dict(document)
+        return None
+
+    def update_one(self, filter_doc, update_doc, **kwargs):
+        self.calls.append(("update_one", dict(filter_doc), dict(update_doc), dict(kwargs)))
+        assert set(filter_doc) == {"_id", "owner_account_id"}
+        for document in self.documents:
+            if (
+                document["_id"] == filter_doc["_id"]
+                and document.get("owner_account_id") == filter_doc["owner_account_id"]
+            ):
+                document.update(update_doc["$set"])
+                return SimpleNamespace(update_info={"n": 1})
+        return SimpleNamespace(update_info={"n": 0})
+
+
 def patch_config(monkeypatch, *, keyspace=""):
     values = {
         "ASTRA_DB_API_ENDPOINT": "https://example-region.apps.astra.datastax.com",
@@ -387,7 +416,22 @@ def test_create_profile_rejects_application_supplied_id(monkeypatch):
         db.create_profile(ACCOUNT_A, valid_profile(_id="client-generated-id"))
 
 
-def test_update_rejects_id_and_empty_updates_before_calling_database(monkeypatch):
+@pytest.mark.parametrize("account_id", ["", "   ", None])
+def test_update_rejects_blank_or_invalid_account_id(monkeypatch, account_id):
+    class FakeCollection:
+        def find_one(self, filter_doc):
+            raise AssertionError("database must not be called for invalid account_id")
+
+        def update_one(self, filter_doc, update_doc, **kwargs):
+            raise AssertionError("database must not be called for invalid account_id")
+
+    monkeypatch.setattr(db, "get_personal_collection", lambda: FakeCollection())
+
+    with pytest.raises(db.InvalidProfileError):
+        db.update_personal_information(account_id, "profile-a", {"name": "Ada"})
+
+
+def test_update_rejects_id_owner_and_empty_updates_before_calling_database(monkeypatch):
     class FakeCollection:
         def find_one(self, filter_doc):
             raise AssertionError("database must not be called for invalid updates")
@@ -398,53 +442,124 @@ def test_update_rejects_id_and_empty_updates_before_calling_database(monkeypatch
     monkeypatch.setattr(db, "get_personal_collection", lambda: FakeCollection())
 
     with pytest.raises(db.InvalidProfileError):
-        db.update_personal_information("profile-1", {"_id": "new-id"})
+        db.update_personal_information(ACCOUNT_A, "profile-a", {"_id": "new-id"})
     with pytest.raises(db.InvalidProfileError):
-        db.update_personal_information("profile-1", {})
+        db.update_personal_information(ACCOUNT_A, "profile-a", {"owner_account_id": ACCOUNT_B})
+    with pytest.raises(db.InvalidProfileError):
+        db.update_personal_information(ACCOUNT_A, "profile-a", {})
+
+
+def test_account_a_and_b_can_update_their_own_profiles(monkeypatch):
+    collection = FakeOwnedProfilesCollection(
+        [
+            profile_document("profile-a", ACCOUNT_A, name="Ada"),
+            profile_document("profile-b", ACCOUNT_B, name="Grace"),
+        ]
+    )
+    monkeypatch.setattr(db, "get_personal_collection", lambda: collection)
+
+    updated_a = db.update_personal_information(ACCOUNT_A, "profile-a", {"name": "Ada Updated"})
+    updated_b = db.update_personal_information(ACCOUNT_B, "profile-b", {"name": "Grace Updated"})
+
+    assert updated_a["name"] == "Ada Updated"
+    assert updated_b["name"] == "Grace Updated"
+    assert (
+        "update_one",
+        {"_id": "profile-a", "owner_account_id": ACCOUNT_A},
+        {"$set": {"name": "Ada Updated"}},
+        {"upsert": False},
+    ) in collection.calls
+    assert (
+        "update_one",
+        {"_id": "profile-b", "owner_account_id": ACCOUNT_B},
+        {"$set": {"name": "Grace Updated"}},
+        {"upsert": False},
+    ) in collection.calls
+
+
+def test_update_foreign_and_legacy_profiles_are_not_modified(monkeypatch):
+    collection = FakeOwnedProfilesCollection(
+        [
+            profile_document("profile-a", ACCOUNT_A, name="Ada"),
+            profile_document("profile-b", ACCOUNT_B, name="Grace"),
+            profile_document("legacy-profile", None, name="Legacy"),
+        ]
+    )
+    monkeypatch.setattr(db, "get_personal_collection", lambda: collection)
+
+    with pytest.raises(db.ProfileNotFoundError):
+        db.update_personal_information(ACCOUNT_B, "profile-a", {"name": "Compromised"})
+    with pytest.raises(db.ProfileNotFoundError):
+        db.update_personal_information(ACCOUNT_A, "profile-b", {"name": "Compromised"})
+    with pytest.raises(db.ProfileNotFoundError):
+        db.update_personal_information(ACCOUNT_A, "legacy-profile", {"name": "Claimed"})
+
+    assert collection.documents[0]["name"] == "Ada"
+    assert collection.documents[1]["name"] == "Grace"
+    assert collection.documents[2]["name"] == "Legacy"
+    assert not any(call[0] == "update_one" for call in collection.calls)
 
 
 def test_update_existing_profile_sets_allowed_fields_and_returns_updated_doc(monkeypatch):
-    calls = []
-
-    class FakeCollection:
-        def __init__(self):
-            self.document = {"_id": "profile-1", "name": "Ada", "age": 31}
-
-        def find_one(self, filter_doc):
-            calls.append(("find_one", filter_doc))
-            if filter_doc == {"_id": "profile-1"}:
-                return dict(self.document)
-            return None
-
-        def update_one(self, filter_doc, update_doc, **kwargs):
-            calls.append(("update_one", filter_doc, update_doc, kwargs))
-            self.document.update(update_doc["$set"])
-            return SimpleNamespace(update_info={"n": 1})
-
-    collection = FakeCollection()
+    collection = FakeOwnedProfilesCollection(
+        [profile_document("profile-a", ACCOUNT_A, name="Ada", age=31)]
+    )
     monkeypatch.setattr(db, "get_personal_collection", lambda: collection)
 
-    updated = db.update_personal_information("profile-1", {"weight": 65, "goals": ["strength"]})
+    updated = db.update_personal_information(
+        ACCOUNT_A,
+        "profile-a",
+        {"weight": 65, "goals": ["strength"]},
+    )
 
     assert updated["weight"] == 65
     assert updated["goals"] == ["strength"]
     assert (
         "update_one",
-        {"_id": "profile-1"},
+        {"_id": "profile-a", "owner_account_id": ACCOUNT_A},
         {"$set": {"weight": 65, "goals": ["strength"]}},
         {"upsert": False},
-    ) in calls
+    ) in collection.calls
+
+
+def test_update_nutrition_uses_same_ownership_boundary(monkeypatch):
+    collection = FakeOwnedProfilesCollection(
+        [
+            profile_document("profile-a", ACCOUNT_A, name="Ada"),
+            profile_document("profile-b", ACCOUNT_B, name="Grace"),
+        ]
+    )
+    monkeypatch.setattr(db, "get_personal_collection", lambda: collection)
+
+    nutrition = {"calories": 2200, "protein": 150, "fat": 80, "carbs": 230}
+    updated = db.update_personal_information(ACCOUNT_A, "profile-a", {"nutrition": nutrition})
+
+    assert updated["nutrition"] == nutrition
+    with pytest.raises(db.ProfileNotFoundError):
+        db.update_personal_information(
+            ACCOUNT_B,
+            "profile-a",
+            {"nutrition": {"calories": 1800}},
+        )
+    assert collection.documents[0]["nutrition"] == nutrition
 
 
 def test_update_missing_profile_raises_not_found_without_upsert(monkeypatch):
-    class FakeCollection:
-        def find_one(self, filter_doc):
-            return None
+    collection = FakeOwnedProfilesCollection(
+        [profile_document("profile-a", ACCOUNT_A, name="Ada")]
+    )
+    monkeypatch.setattr(db, "get_personal_collection", lambda: collection)
 
-        def update_one(self, filter_doc, update_doc, **kwargs):
-            raise AssertionError("update_one must not be called for missing profile")
+    with pytest.raises(db.ProfileNotFoundError) as missing_profile:
+        db.update_personal_information(ACCOUNT_A, "missing", {"name": "Missing"})
+    with pytest.raises(db.ProfileNotFoundError) as foreign_profile:
+        db.update_personal_information(ACCOUNT_B, "profile-a", {"name": "Foreign"})
 
-    monkeypatch.setattr(db, "get_personal_collection", lambda: FakeCollection())
+    assert type(missing_profile.value) is type(foreign_profile.value)
+    assert str(missing_profile.value) == str(foreign_profile.value)
+    assert not any(call[0] == "update_one" for call in collection.calls)
 
-    with pytest.raises(db.ProfileNotFoundError):
-        db.update_personal_information("missing", {"name": "Ada"})
+
+def test_update_personal_information_requires_account_id_argument():
+    with pytest.raises(TypeError):
+        db.update_personal_information("profile-a", {"name": "Ada"})

@@ -232,17 +232,70 @@ def test_create_new_profile_requires_account_id():
 def test_save_profile_changes_normalizes_updated_profile(monkeypatch):
     calls = []
 
-    def fake_update(profile_id, updates):
-        calls.append((profile_id, updates))
+    def fake_update(account_id, profile_id, updates):
+        calls.append((account_id, profile_id, updates))
         return raw_profile(_id=profile_id, goals=updates["goals"], nutrition=None)
 
     monkeypatch.setattr(profiles.db, "update_personal_information", fake_update)
 
-    result = profiles.save_profile_changes("profile-1", goals=["endurance"], nutrition=None)
+    result = profiles.save_profile_changes(
+        ACCOUNT_ID,
+        "profile-1",
+        goals=["endurance"],
+        nutrition=None,
+    )
 
-    assert calls == [("profile-1", {"goals": ["endurance"]})]
+    assert calls == [(ACCOUNT_ID, "profile-1", {"goals": ["endurance"]})]
     assert result["goals"] == ["endurance"]
     assert "nutrition" not in result
+
+
+def test_save_profile_changes_preserves_nutrition_and_passes_account_id(monkeypatch):
+    calls = []
+
+    def fake_update(account_id, profile_id, updates):
+        calls.append((account_id, profile_id, updates))
+        return raw_profile(_id=profile_id, nutrition=updates["nutrition"])
+
+    monkeypatch.setattr(profiles.db, "update_personal_information", fake_update)
+
+    result = profiles.save_profile_changes(
+        ACCOUNT_ID,
+        "profile-1",
+        nutrition={
+            "carbs": 230,
+            "fat": 80,
+            "protein": 150,
+            "calories": 2200,
+            "ignored": "not persisted",
+        },
+    )
+
+    assert calls == [
+        (
+            ACCOUNT_ID,
+            "profile-1",
+            {
+                "nutrition": {
+                    "calories": 2200,
+                    "protein": 150,
+                    "fat": 80,
+                    "carbs": 230,
+                }
+            },
+        )
+    ]
+    assert result["nutrition"] == {
+        "calories": 2200,
+        "protein": 150,
+        "fat": 80,
+        "carbs": 230,
+    }
+
+
+def test_save_profile_changes_requires_account_id_argument():
+    with pytest.raises(TypeError):
+        profiles.save_profile_changes("profile-1", goals=["endurance"])
 
 
 def test_dict_to_string_is_project_deterministic_serializer():
