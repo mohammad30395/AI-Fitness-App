@@ -107,3 +107,64 @@
   - `./.venv/bin/python -m compileall main.py profiles.py db.py ai.py utils.py`: passed.
   - `./.venv/bin/python -m pytest tests/test_profiles.py tests/test_db.py tests/test_utils_serialization.py tests/test_ai.py tests/test_main_resilience.py`: 154 passed.
 - Skipped live/setup scripts such as `scripts/live_acceptance.py`, `scripts/check_astra.py`, setup scripts, and macro-flow smoke scripts because they can require cloud credentials or call Astra/Langflow.
+
+## UI Prompt-01 — Option Contract & Legacy Compatibility
+
+### Canonical UI options
+
+Gender:
+- Male
+- Female
+- Other
+
+Activity:
+- Sedentary
+- Lightly Active
+- Moderately Active
+- Very Active
+- Super Active
+
+Goals:
+- Muscle Gain
+- Fat Loss
+- Stay Active
+
+### Legacy compatibility strategy
+- Canonical options are defined as immutable tuples in `main.py`; they are UI choices only, not database enums.
+- `_single_choice_options_with_current()` returns canonical options unchanged when the current value is already canonical, `None`, empty, or blank.
+- `_single_choice_options_with_current()` prepends a meaningful non-canonical current value to the canonical options. This keeps a stored legacy value representable by a future radio/selectbox without rewriting it.
+- `_goal_options_with_existing()` returns canonical goals plus any meaningful existing goals that are not already present.
+- Existing custom goals are appended in their current order, with duplicates removed, so edit-mode multiselect options can include every stored value.
+- Helper logic does not mutate caller-owned lists or tuples.
+
+### Mapping policy
+- NO automatic semantic mapping.
+- `moderate` != automatically `Moderately Active`.
+- `active` != automatically `Very Active`.
+- `unspecified` != automatically `Other`.
+- `Build strength` != automatically `Muscle Gain`.
+- `Improve endurance` != automatically `Stay Active`.
+
+### Helpers added
+- `_unique_meaningful_options()` in `main.py`: shared pure dedupe/blank-filter helper for UI option preparation.
+- `_single_choice_options_with_current()` in `main.py`: prepares future radio/selectbox options while preserving non-canonical current stored strings.
+- `_goal_options_with_existing()` in `main.py`: prepares future multiselect options while preserving legacy/custom goal strings.
+- Streamlit 1.61.1 exposes `format_func` on `st.radio`, `st.selectbox`, and `st.multiselect`; UI Prompt-02 can use that for display-only legacy labels if needed without changing stored values.
+
+### Test coverage added
+- Added `tests/test_profile_ui_options.py`.
+- Covers exact canonical constants, canonical deduplication, unknown gender preservation, unknown activity preservation for `moderate` and `active`, no semantic activity mapping, blank single-choice handling, canonical goal availability, legacy goal preservation, goal deduplication, deterministic existing-goal order, helper non-mutation, and unchanged `gender: str`, `activity_level: str`, `goals: list[str]` storage validation.
+
+### Files changed
+- `main.py`
+- `tests/test_profile_ui_options.py`
+- `docs/UI_UPDATE_STATE.md`
+
+### Verification result
+- Focused helper tests: `./.venv/bin/python -m pytest tests/test_profile_ui_options.py` passed with 11 tests.
+- Safe regression subset: `./.venv/bin/python -m pytest tests/test_profile_ui_options.py tests/test_profiles.py tests/test_db.py tests/test_utils_serialization.py tests/test_ai.py tests/test_main_resilience.py` passed with 165 tests.
+- Compile verification: `./.venv/bin/python -m compileall main.py profiles.py db.py ai.py utils.py` passed.
+- No live Astra, Langflow, OpenRouter, setup, or smoke scripts should be run for this milestone.
+
+### Ready for UI Prompt-02
+- Yes.

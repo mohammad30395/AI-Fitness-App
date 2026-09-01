@@ -41,6 +41,16 @@ SESSION_DEFAULTS = {
     "ask_ai_error": None,
 }
 
+GENDER_OPTIONS = ("Male", "Female", "Other")
+ACTIVITY_LEVEL_OPTIONS = (
+    "Sedentary",
+    "Lightly Active",
+    "Moderately Active",
+    "Very Active",
+    "Super Active",
+)
+GOAL_OPTIONS = ("Muscle Gain", "Fat Loss", "Stay Active")
+
 
 def _sanitize_diagnostic(message: str) -> str:
     sanitized = str(message)
@@ -199,6 +209,37 @@ def _goals_to_text(profile: dict) -> str:
     if not isinstance(goals, list):
         return str(goals)
     return "\n".join(str(goal) for goal in goals)
+
+
+def _unique_meaningful_options(values) -> tuple[str, ...]:
+    options = []
+    for value in values or ():
+        option = str(value).strip()
+        if option and option not in options:
+            options.append(option)
+    return tuple(options)
+
+
+def _single_choice_options_with_current(canonical_options, current_value) -> tuple[str, ...]:
+    canonical = _unique_meaningful_options(canonical_options)
+    if current_value is None:
+        return canonical
+
+    current_option = str(current_value).strip()
+    if not current_option or current_option in canonical:
+        return canonical
+
+    # Legacy current values go first so edit-mode widgets can show them by default.
+    return (current_option, *canonical)
+
+
+def _goal_options_with_existing(canonical_options, existing_goals) -> tuple[str, ...]:
+    options = list(_unique_meaningful_options(canonical_options))
+    for goal in existing_goals or ():
+        goal_option = str(goal).strip()
+        if goal_option and goal_option not in options:
+            options.append(goal_option)
+    return tuple(options)
 
 
 def _safe_profile_error(action: str, error: Exception) -> str:
