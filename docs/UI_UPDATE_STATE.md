@@ -361,3 +361,91 @@ Goals
 
 ### Ready for UI Prompt-05
 - Yes.
+
+## UI Prompt-05 — Light/Dark Runtime Theme
+
+### Streamlit runtime theme capability
+- Installed Streamlit version checked in the project virtualenv: 1.61.1.
+- No supported public API was found for switching Streamlit's built-in theme at runtime.
+- Private Streamlit theme/config internals were not used.
+- Implementation uses `st.session_state` plus centralized CSS custom properties.
+
+### Theme state
+- Session key: `ui_theme`.
+- Allowed values: `light` and `dark`.
+- Default behavior: unsupported, absent, or invalid values initialize to `light`.
+- Rerun behavior: existing valid theme state is preserved by `_initialize_ui_theme_state()`.
+- `_toggle_ui_theme()` changes only `ui_theme`.
+
+### Theme control
+- The control is a native `st.button`, rendered through a top-right `st.columns((6, 1))` layout.
+- Light mode shows `🌙 Dark`.
+- Dark mode shows `☀️ Light`.
+- It is rendered immediately after `st.set_page_config()` and before authentication/profile controls.
+- No JavaScript or HTML-based functional control was added.
+
+### Theme tokens and CSS
+- Theme tokens are centralized in `UI_THEME_TOKENS`.
+- Token contract includes background, surface, surface_alt, text, text_muted, border, input_background, accent, button_background, button_text, success, warning, and error.
+- CSS is injected from `_apply_ui_theme()` with custom properties and stable selectors such as `data-testid` and `data-baseweb`.
+- Generated/hash selectors are not used.
+- Runtime `.streamlit/config.toml` mutation was not added.
+- No dependencies were added.
+
+### Light theme
+- Background: `#f7f8fb`.
+- Surface: `#ffffff`.
+- Alternate surface: `#eef2f7`.
+- Text: `#172033`.
+- Muted text: `#586174`.
+- Input background: `#ffffff`.
+- Accent/button: `#2563eb`.
+
+### Dark theme
+- Background: `#111827`.
+- Surface: `#1f2937`.
+- Alternate surface: `#273449`.
+- Text: `#f3f4f6`.
+- Muted text: `#c5cbd6`.
+- Input background: `#172033`.
+- Accent/button: `#60a5fa`.
+
+### State preservation
+- Theme toggling does not reset `selected_profile_id`.
+- Theme toggling does not clear `selected_profile`.
+- Theme toggling does not clear create-mode Goals editor state.
+- Theme toggling does not clear edit-mode Goals editor state.
+- Removing the starter `Muscle Gain` goal remains preserved across a theme switch.
+- Custom create/edit goals remain preserved across a theme switch.
+- Theme toggling does not clear nutrition, notes, note confirmation, Ask AI answer, or Ask AI error state.
+
+### Backend isolation
+- Theme toggling does not write to profile persistence.
+- Theme toggling does not call Astra directly.
+- Theme toggling does not call Langflow.
+- Theme toggling does not call OpenRouter.
+- The Goals `+` and `−` controls remain temporary session-state actions only.
+- Profile Create/Save remains the only profile-form persistence boundary.
+
+### Existing UI preservation
+- Gender remains `st.radio`.
+- Activity Level remains `st.selectbox`.
+- Goals remain the dynamic native `+` / `−` editor.
+- `st.multiselect` is not active in the profile Goals editor.
+
+### Tests
+- Focused UI/theme tests: `./.venv/bin/python -m pytest tests/test_profile_ui_options.py tests/test_main_resilience.py` passed with 76 tests.
+- Safe regression suite should remain: `./.venv/bin/python -m pytest tests/test_profile_ui_options.py tests/test_profiles.py tests/test_db.py tests/test_utils_serialization.py tests/test_ai.py tests/test_main_resilience.py`.
+- Compile verification should remain: `./.venv/bin/python -m compileall main.py profiles.py db.py ai.py utils.py`.
+- Coverage includes initialization, allowed values, default fallback, both toggle directions, rerun persistence, selected-profile preservation, create/edit Goals preservation, removed starter goal preservation, custom Goals preservation, backend isolation, control ordering, no private API, no JavaScript, Gender regression, Activity regression, and Goals editor regression.
+
+### Visual verification
+- Method: source/layout inspection plus mocked Streamlit UI tests.
+- Manual browser visual verification: not run because rendering and interacting with the authenticated profile UI requires live Astra-backed login/profile loading, and the repository has no safe local/mock visual mode.
+
+### Backend impact
+- `profiles.py`: unchanged.
+- `db.py`: unchanged.
+- `ai.py`: unchanged.
+- Langflow: unchanged.
+- Astra DB/schema: unchanged.

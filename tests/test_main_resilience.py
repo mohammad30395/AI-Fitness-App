@@ -33,13 +33,25 @@ class FakeTab:
 
 
 class FakeColumn(FakeTab):
+    def __init__(self, fake_st=None):
+        self.fake_st = fake_st
+
     def caption(self, *args, **kwargs):
+        if self.fake_st is not None:
+            self.fake_st.caption(*args, **kwargs)
         return None
 
     def metric(self, *args, **kwargs):
         return None
 
+    def number_input(self, *args, **kwargs):
+        if self.fake_st is not None:
+            return self.fake_st.number_input(*args, **kwargs)
+        return kwargs.get("value")
+
     def subheader(self, *args, **kwargs):
+        if self.fake_st is not None:
+            self.fake_st.subheader(*args, **kwargs)
         return None
 
 
@@ -49,6 +61,7 @@ class FakeStreamlit:
         self.info_messages = []
         self.error_messages = []
         self.caption_messages = []
+        self.markdown_calls = []
         self.page_config = None
         self.input_values = {}
         self.text_input_calls = []
@@ -60,10 +73,12 @@ class FakeStreamlit:
         self.submit_value = False
         self.form_submit_values = {}
         self.form_submit_calls = []
+        self.button_calls = []
         self.button_values = {}
         self.tab_labels = []
         self.headers = []
         self.private_ui_allowed = False
+        self.events = []
 
     def set_page_config(self, **kwargs):
         self.page_config = kwargs
@@ -76,9 +91,11 @@ class FakeStreamlit:
 
     def header(self, message):
         self.headers.append(message)
+        self.events.append(("header", message))
 
     def subheader(self, *args, **kwargs):
         self.subheader_calls.append((args, kwargs))
+        self.events.append(("subheader", args[0] if args else ""))
         return None
 
     def tabs(self, labels):
@@ -88,7 +105,7 @@ class FakeStreamlit:
     def columns(self, spec, **kwargs):
         self.columns_calls.append((spec, kwargs))
         count = spec if isinstance(spec, int) else len(spec)
-        return [FakeColumn() for _ in range(count)]
+        return [FakeColumn(self) for _ in range(count)]
 
     def container(self, **kwargs):
         return FakeTab()
@@ -110,6 +127,7 @@ class FakeStreamlit:
 
     def radio(self, label, **kwargs):
         self.radio_calls.append((label, kwargs))
+        self.events.append(("radio", label))
         if label in self.input_values:
             return self.input_values[label]
         options = tuple(kwargs.get("options", ()))
@@ -118,6 +136,7 @@ class FakeStreamlit:
 
     def selectbox(self, label, options, index=0, **kwargs):
         self.selectbox_calls.append((label, {"options": options, "index": index, **kwargs}))
+        self.events.append(("selectbox", label))
         if label in self.input_values:
             return self.input_values[label]
         options = tuple(options)
@@ -127,6 +146,7 @@ class FakeStreamlit:
         self.multiselect_calls.append(
             (label, {"options": options, "default": default, **kwargs})
         )
+        self.events.append(("multiselect", label))
         if label in self.input_values:
             return self.input_values[label]
         return list(default or [])
@@ -136,6 +156,7 @@ class FakeStreamlit:
 
     def form_submit_button(self, label, **kwargs):
         self.form_submit_calls.append((label, kwargs))
+        self.events.append(("form_submit_button", label))
         key = kwargs.get("key")
         clicked = self.form_submit_values.get(key, False)
         if key is None:
@@ -145,7 +166,13 @@ class FakeStreamlit:
         return clicked
 
     def button(self, label, **kwargs):
-        return self.button_values.get(label, False)
+        self.button_calls.append((label, kwargs))
+        self.events.append(("button", label))
+        key = kwargs.get("key")
+        clicked = self.button_values.get(key, self.button_values.get(label, False))
+        if clicked and kwargs.get("on_click"):
+            kwargs["on_click"](*(kwargs.get("args") or ()), **(kwargs.get("kwargs") or {}))
+        return clicked
 
     def stop(self):
         raise StopCalled
@@ -159,6 +186,7 @@ class FakeStreamlit:
 
     def caption(self, *args, **kwargs):
         self.caption_messages.append(args[0] if args else "")
+        self.events.append(("caption", args[0] if args else ""))
         if not self.private_ui_allowed:
             raise AssertionError("private UI must not render before authentication")
 
@@ -172,6 +200,7 @@ class FakeStreamlit:
         return None
 
     def markdown(self, *args, **kwargs):
+        self.markdown_calls.append((args, kwargs))
         return None
 
     def spinner(self, *args, **kwargs):
@@ -223,6 +252,222 @@ def test_auth_session_defaults_preserve_existing_authenticated_state(monkeypatch
     assert fake_st.session_state["account_id"] == "account-1"
     assert fake_st.session_state["username"] == "casey"
     assert fake_st.session_state["auth_session_id"] == "session-1"
+
+
+def test_ui_theme_initializes_to_light_once(monkeypatch):
+    fake_st = FakeStreamlit()
+    monkeypatch.setattr(main, "st", fake_st)
+
+    main._initialize_ui_theme_state()
+    main._initialize_ui_theme_state()
+
+    assert fake_st.session_state[main.UI_THEME_SESSION_KEY] == "light"
+
+
+def test_ui_theme_allowed_values_are_exact_contract():
+    assert main.UI_THEME_OPTIONS == ("light", "dark")
+    assert set(main.UI_THEME_TOKENS) == {"light", "dark"}
+
+
+def test_ui_theme_defaults_to_light_without_public_runtime_theme_api(monkeypatch):
+    fake_st = FakeStreamlit()
+    monkeypatch.setattr(main, "st", fake_st)
+
+    main._initialize_ui_theme_state()
+
+    assert not hasattr(fake_st, "theme")
+    assert fake_st.session_state[main.UI_THEME_SESSION_KEY] == "light"
+
+
+def test_ui_theme_toggle_light_to_dark(monkeypatch):
+    fake_st = FakeStreamlit()
+    fake_st.session_state[main.UI_THEME_SESSION_KEY] = "light"
+    monkeypatch.setattr(main, "st", fake_st)
+
+    main._toggle_ui_theme()
+
+    assert fake_st.session_state[main.UI_THEME_SESSION_KEY] == "dark"
+
+
+def test_ui_theme_toggle_dark_to_light(monkeypatch):
+    fake_st = FakeStreamlit()
+    fake_st.session_state[main.UI_THEME_SESSION_KEY] = "dark"
+    monkeypatch.setattr(main, "st", fake_st)
+
+    main._toggle_ui_theme()
+
+    assert fake_st.session_state[main.UI_THEME_SESSION_KEY] == "light"
+
+
+def test_ui_theme_persists_across_initialization_reruns(monkeypatch):
+    fake_st = FakeStreamlit()
+    fake_st.session_state[main.UI_THEME_SESSION_KEY] = "dark"
+    monkeypatch.setattr(main, "st", fake_st)
+
+    main._initialize_ui_theme_state()
+    main._initialize_ui_theme_state()
+
+    assert fake_st.session_state[main.UI_THEME_SESSION_KEY] == "dark"
+
+
+def test_ui_theme_toggle_preserves_profile_and_workflow_state(monkeypatch):
+    fake_st = FakeStreamlit()
+    selected_profile = {"_id": "profile-a", "name": "A", "goals": ["Fat Loss"]}
+    fake_st.session_state.update(
+        {
+            main.UI_THEME_SESSION_KEY: "light",
+            "selected_profile_id": "profile-a",
+            "selected_profile": selected_profile,
+            "profiles": [selected_profile],
+            "create_profile_form_goals_editor": [],
+            "edit_profile_form_goals_editor_profile-a": ["Stay Active"],
+            "nutrition": {"calories": 2100},
+            "nutrition_draft": {"calories": 2200},
+            "nutrition_draft_profile_id": "profile-a",
+            "nutrition_draft_version": 3,
+            "notes": [{"_id": "note-a", "text": "private note"}],
+            "notes_profile_id": "profile-a",
+            "confirm_delete_note_id": "note-a",
+            "last_ai_answer": "existing answer",
+            "ask_ai_error": "existing error",
+        }
+    )
+    before = dict(fake_st.session_state)
+    monkeypatch.setattr(main, "st", fake_st)
+
+    main._toggle_ui_theme()
+
+    expected = dict(before)
+    expected[main.UI_THEME_SESSION_KEY] = "dark"
+    assert fake_st.session_state == expected
+
+
+def test_removed_starter_goal_does_not_reappear_after_theme_switch(monkeypatch):
+    fake_st = FakeStreamlit()
+    fake_st.session_state.update(
+        {
+            main.UI_THEME_SESSION_KEY: "light",
+            "create_profile_form_goals_editor": [],
+        }
+    )
+    monkeypatch.setattr(main, "st", fake_st)
+
+    main._toggle_ui_theme()
+    state_key = main._initialize_goal_editor_state(
+        form_key="create_profile_form",
+        is_edit=False,
+    )
+
+    assert fake_st.session_state[main.UI_THEME_SESSION_KEY] == "dark"
+    assert fake_st.session_state[state_key] == []
+
+
+def test_custom_goal_survives_theme_switch(monkeypatch):
+    fake_st = FakeStreamlit()
+    fake_st.session_state.update(
+        {
+            main.UI_THEME_SESSION_KEY: "dark",
+            "create_profile_form_goals_editor": ["Run a marathon"],
+            "edit_profile_form_goals_editor_profile-a": ["Improve mobility"],
+        }
+    )
+    monkeypatch.setattr(main, "st", fake_st)
+
+    main._toggle_ui_theme()
+
+    assert fake_st.session_state["create_profile_form_goals_editor"] == ["Run a marathon"]
+    assert fake_st.session_state["edit_profile_form_goals_editor_profile-a"] == [
+        "Improve mobility"
+    ]
+
+
+def test_ui_theme_toggle_does_not_call_profile_or_ai_backends(monkeypatch):
+    fake_st = FakeStreamlit()
+    monkeypatch.setattr(main, "st", fake_st)
+
+    def fail_backend_call(*args, **kwargs):
+        raise AssertionError("theme toggle must not call backends")
+
+    monkeypatch.setattr(main.profiles, "create_new_profile", fail_backend_call)
+    monkeypatch.setattr(main.profiles, "save_profile_changes", fail_backend_call)
+    monkeypatch.setattr(main.db, "create_profile", fail_backend_call)
+    monkeypatch.setattr(main.db, "update_personal_information", fail_backend_call)
+    monkeypatch.setattr(main.ai, "get_macros", fail_backend_call)
+    monkeypatch.setattr(main.ai, "ask_ai", fail_backend_call)
+
+    main._initialize_ui_theme_state()
+    main._toggle_ui_theme()
+
+    assert fake_st.session_state[main.UI_THEME_SESSION_KEY] == "dark"
+
+
+def test_ui_theme_control_uses_top_right_button_and_callback(monkeypatch):
+    fake_st = FakeStreamlit()
+    fake_st.session_state[main.UI_THEME_SESSION_KEY] = "light"
+    fake_st.button_values["ui_theme_toggle"] = True
+    monkeypatch.setattr(main, "st", fake_st)
+
+    main._render_theme_control()
+
+    assert fake_st.columns_calls == [((6, 1), {"vertical_alignment": "center"})]
+    assert fake_st.button_calls == [
+        (
+            "🌙 Dark",
+            {
+                "key": "ui_theme_toggle",
+                "help": "Switch to dark mode",
+                "on_click": main._toggle_ui_theme,
+                "use_container_width": True,
+            },
+        )
+    ]
+    assert fake_st.session_state[main.UI_THEME_SESSION_KEY] == "dark"
+
+
+def test_ui_theme_control_renders_before_main_profile_controls(monkeypatch):
+    fake_st = FakeStreamlit()
+    fake_st.private_ui_allowed = True
+    seed_authenticated_session(fake_st, account_id="account-a")
+    monkeypatch.setattr(main, "st", fake_st)
+
+    def fake_refresh(select_profile_id=None):
+        fake_st.session_state["profiles"] = []
+        fake_st.session_state["selected_profile_id"] = None
+        fake_st.session_state["selected_profile"] = None
+        return True
+
+    monkeypatch.setattr(main, "_refresh_profiles", fake_refresh)
+
+    main.main()
+
+    theme_button_index = fake_st.events.index(("button", "🌙 Dark"))
+    gender_radio_index = fake_st.events.index(("radio", "Gender"))
+    assert theme_button_index < gender_radio_index
+
+
+def test_ui_theme_css_uses_tokens_without_js_or_private_api(monkeypatch):
+    fake_st = FakeStreamlit()
+    fake_st.session_state[main.UI_THEME_SESSION_KEY] = "dark"
+    monkeypatch.setattr(main, "st", fake_st)
+
+    main._apply_ui_theme()
+
+    css = fake_st.markdown_calls[0][0][0]
+    assert fake_st.markdown_calls[0][1] == {"unsafe_allow_html": True}
+    assert "--fit-background: #111827;" in css
+    assert "[data-testid=\"stAppViewContainer\"]" in css
+    assert "<script" not in css.lower()
+    assert "st._config" not in css
+
+
+def test_main_source_avoids_private_theme_api_and_javascript():
+    source = main.__loader__.get_source(main.__name__)
+
+    assert "st._config" not in source
+    assert "streamlit.config" not in source
+    assert "<script" not in source.lower()
+    assert "components.html" not in source
+    assert ".html(" not in source
 
 
 def test_trusted_account_id_comes_from_authenticated_session(monkeypatch):
@@ -324,6 +569,7 @@ def test_unauthenticated_main_stops_before_private_work(monkeypatch):
     ]
     assert fake_st.tab_labels == [("Login", "Create Account")]
     assert fake_st.session_state == {
+        "ui_theme": "light",
         "authenticated": False,
         "account_id": None,
         "username": None,

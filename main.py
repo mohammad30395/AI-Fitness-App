@@ -41,6 +41,42 @@ SESSION_DEFAULTS = {
     "ask_ai_error": None,
 }
 
+UI_THEME_SESSION_KEY = "ui_theme"
+UI_THEME_OPTIONS = ("light", "dark")
+DEFAULT_UI_THEME = "light"
+UI_THEME_TOKENS = {
+    "light": {
+        "background": "#f7f8fb",
+        "surface": "#ffffff",
+        "surface_alt": "#eef2f7",
+        "text": "#172033",
+        "text_muted": "#586174",
+        "border": "#d8dee9",
+        "input_background": "#ffffff",
+        "accent": "#2563eb",
+        "button_background": "#2563eb",
+        "button_text": "#ffffff",
+        "success": "#047857",
+        "warning": "#b45309",
+        "error": "#b91c1c",
+    },
+    "dark": {
+        "background": "#111827",
+        "surface": "#1f2937",
+        "surface_alt": "#273449",
+        "text": "#f3f4f6",
+        "text_muted": "#c5cbd6",
+        "border": "#3f4b5f",
+        "input_background": "#172033",
+        "accent": "#60a5fa",
+        "button_background": "#60a5fa",
+        "button_text": "#0b1220",
+        "success": "#34d399",
+        "warning": "#fbbf24",
+        "error": "#f87171",
+    },
+}
+
 GENDER_OPTIONS = ("Male", "Female", "Other")
 ACTIVITY_LEVEL_OPTIONS = (
     "Sedentary",
@@ -97,6 +133,116 @@ def initialize_session_state() -> None:
     for key, value in SESSION_DEFAULTS.items():
         if key not in st.session_state:
             st.session_state[key] = _default_session_value(value)
+
+
+def _initialize_ui_theme_state() -> None:
+    if st.session_state.get(UI_THEME_SESSION_KEY) not in UI_THEME_OPTIONS:
+        st.session_state[UI_THEME_SESSION_KEY] = DEFAULT_UI_THEME
+
+
+def _toggle_ui_theme() -> None:
+    current_theme = st.session_state.get(UI_THEME_SESSION_KEY, DEFAULT_UI_THEME)
+    st.session_state[UI_THEME_SESSION_KEY] = "dark" if current_theme == "light" else "light"
+
+
+def _current_ui_theme() -> str:
+    theme = st.session_state.get(UI_THEME_SESSION_KEY, DEFAULT_UI_THEME)
+    return theme if theme in UI_THEME_OPTIONS else DEFAULT_UI_THEME
+
+
+def _theme_declarations(theme: str) -> str:
+    tokens = UI_THEME_TOKENS[theme if theme in UI_THEME_OPTIONS else DEFAULT_UI_THEME]
+    return "\n".join(
+        f"    --fit-{name.replace('_', '-')}: {value};"
+        for name, value in tokens.items()
+    )
+
+
+def _apply_ui_theme() -> None:
+    declarations = _theme_declarations(_current_ui_theme())
+    st.markdown(
+        f"""
+<style>
+:root {{
+{declarations}
+}}
+
+[data-testid="stAppViewContainer"] {{
+    background: var(--fit-background);
+    color: var(--fit-text);
+}}
+
+[data-testid="stHeader"] {{
+    background: color-mix(in srgb, var(--fit-background) 88%, transparent);
+}}
+
+[data-testid="stMarkdownContainer"],
+[data-testid="stCaptionContainer"],
+[data-testid="stText"],
+label,
+p,
+span {{
+    color: var(--fit-text);
+}}
+
+[data-testid="stCaptionContainer"],
+[data-testid="stMarkdownContainer"] small {{
+    color: var(--fit-text-muted);
+}}
+
+[data-testid="stForm"],
+[data-testid="stVerticalBlockBorderWrapper"] {{
+    background-color: var(--fit-surface);
+    border-color: var(--fit-border);
+}}
+
+[data-testid="stTextInput"] input,
+[data-testid="stNumberInput"] input,
+[data-testid="stTextArea"] textarea,
+div[data-baseweb="select"] > div {{
+    background-color: var(--fit-input-background);
+    color: var(--fit-text);
+    border-color: var(--fit-border);
+}}
+
+[data-testid="stRadio"] label,
+[data-testid="stSelectbox"] label,
+[data-testid="stTextInput"] label,
+[data-testid="stNumberInput"] label,
+[data-testid="stTextArea"] label {{
+    color: var(--fit-text);
+}}
+
+[data-testid="stButton"] button,
+[data-testid="stFormSubmitButton"] button {{
+    border-color: var(--fit-border);
+}}
+
+[data-testid="stButton"] button[kind="primary"],
+[data-testid="stFormSubmitButton"] button[kind="primary"] {{
+    background-color: var(--fit-button-background);
+    color: var(--fit-button-text);
+    border-color: var(--fit-button-background);
+}}
+</style>
+""",
+        unsafe_allow_html=True,
+    )
+
+
+def _render_theme_control() -> None:
+    theme = _current_ui_theme()
+    label = "🌙 Dark" if theme == "light" else "☀️ Light"
+    help_text = "Switch to dark mode" if theme == "light" else "Switch to light mode"
+    _, control_col = st.columns((6, 1), vertical_alignment="center")
+    with control_col:
+        st.button(
+            label,
+            key="ui_theme_toggle",
+            help=help_text,
+            on_click=_toggle_ui_theme,
+            use_container_width=True,
+        )
 
 
 def _initialize_auth_session_state() -> None:
@@ -1018,6 +1164,9 @@ def main() -> None:
         page_title="Personal Fitness AI Assistant",
         layout="wide",
     )
+    _initialize_ui_theme_state()
+    _apply_ui_theme()
+    _render_theme_control()
     _initialize_auth_session_state()
     _enforce_authentication_gate()
     initialize_session_state()
