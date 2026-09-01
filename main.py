@@ -50,6 +50,11 @@ ACTIVITY_LEVEL_OPTIONS = (
     "Super Active",
 )
 GOAL_OPTIONS = ("Muscle Gain", "Fat Loss", "Stay Active")
+PROFILE_CHOICE_WIDGET_SUFFIXES = (
+    "gender_choice",
+    "activity_level_choice",
+    "goals_multiselect",
+)
 
 
 def _sanitize_diagnostic(message: str) -> str:
@@ -242,6 +247,36 @@ def _goal_options_with_existing(canonical_options, existing_goals) -> tuple[str,
     return tuple(options)
 
 
+def _goals_from_profile(profile: dict | None) -> list[str]:
+    profile = profile or {}
+    goals = profile.get("goals", [])
+    if not isinstance(goals, list):
+        cleaned_goal = str(goals).strip()
+        return [cleaned_goal] if cleaned_goal else []
+    return [str(goal).strip() for goal in goals if str(goal).strip()]
+
+
+def _selected_option_index(options: tuple[str, ...], current_value) -> int | None:
+    if current_value is None:
+        return None
+    current_option = str(current_value).strip()
+    if not current_option:
+        return None
+    try:
+        return options.index(current_option)
+    except ValueError:
+        return None
+
+
+def _profile_choice_widget_key(form_key: str, suffix: str) -> str:
+    return f"{form_key}_{suffix}"
+
+
+def _clear_edit_profile_choice_widget_state() -> None:
+    for suffix in PROFILE_CHOICE_WIDGET_SUFFIXES:
+        st.session_state.pop(_profile_choice_widget_key("edit_profile_form", suffix), None)
+
+
 def _safe_profile_error(action: str, error: Exception) -> str:
     if isinstance(error, (db.InvalidProfileError, profiles.ProfileDataError)):
         message = _sanitize_diagnostic(str(error))
@@ -277,6 +312,7 @@ def _copy_nutrition(nutrition):
 
 def _set_selected_profile(profile: dict | None) -> None:
     st.session_state["selected_profile"] = profile
+    _clear_edit_profile_choice_widget_state()
     stored_nutrition = _copy_nutrition(profile.get("nutrition")) if profile else None
     st.session_state["nutrition"] = stored_nutrition
     _set_nutrition_draft(profile.get("_id") if profile else None, stored_nutrition)
@@ -367,6 +403,22 @@ def _render_profile_form(*, mode: str, profile: dict | None = None) -> None:
     is_edit = mode == "edit"
     form_key = "edit_profile_form" if is_edit else "create_profile_form"
     submit_label = "Save changes" if is_edit else "Create profile"
+    selected_goals = _goals_from_profile(profile) if is_edit else []
+    gender_options = (
+        _single_choice_options_with_current(GENDER_OPTIONS, defaults["gender"])
+        if is_edit
+        else GENDER_OPTIONS
+    )
+    activity_level_options = (
+        _single_choice_options_with_current(ACTIVITY_LEVEL_OPTIONS, defaults["activity_level"])
+        if is_edit
+        else ACTIVITY_LEVEL_OPTIONS
+    )
+    goal_options = (
+        _goal_options_with_existing(GOAL_OPTIONS, selected_goals)
+        if is_edit
+        else GOAL_OPTIONS
+    )
 
     with st.form(form_key):
         name = st.text_input("Name", value=defaults["name"], key=f"{form_key}_name")
@@ -397,18 +449,25 @@ def _render_profile_form(*, mode: str, profile: dict | None = None) -> None:
             )
         gender_col, activity_col = st.columns(2)
         with gender_col:
-            gender = st.text_input("Gender", value=defaults["gender"], key=f"{form_key}_gender")
-        with activity_col:
-            activity_level = st.text_input(
-                "Activity level",
-                value=defaults["activity_level"],
-                key=f"{form_key}_activity_level",
+            gender = st.radio(
+                "Gender",
+                options=gender_options,
+                index=_selected_option_index(gender_options, defaults["gender"]),
+                key=_profile_choice_widget_key(form_key, "gender_choice"),
             )
-        goals_text = st.text_area(
+        with activity_col:
+            activity_level = st.selectbox(
+                "Activity Level",
+                options=activity_level_options,
+                index=_selected_option_index(activity_level_options, defaults["activity_level"]),
+                key=_profile_choice_widget_key(form_key, "activity_level_choice"),
+                placeholder="Choose activity level",
+            )
+        goals = st.multiselect(
             "Goals",
-            value=defaults["goals"],
-            placeholder="Build strength\nImprove endurance",
-            key=f"{form_key}_goals",
+            options=goal_options,
+            default=selected_goals,
+            key=_profile_choice_widget_key(form_key, "goals_multiselect"),
         )
 
         submitted = st.form_submit_button(submit_label, type="primary")
@@ -423,7 +482,7 @@ def _render_profile_form(*, mode: str, profile: dict | None = None) -> None:
         "height": float(height),
         "gender": gender,
         "activity_level": activity_level,
-        "goals": _goals_from_text(goals_text),
+        "goals": list(goals or []),
     }
 
     try:

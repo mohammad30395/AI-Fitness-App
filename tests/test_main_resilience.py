@@ -52,6 +52,9 @@ class FakeStreamlit:
         self.page_config = None
         self.input_values = {}
         self.text_input_calls = []
+        self.radio_calls = []
+        self.selectbox_calls = []
+        self.multiselect_calls = []
         self.submit_value = False
         self.button_values = {}
         self.tab_labels = []
@@ -93,6 +96,29 @@ class FakeStreamlit:
 
     def text_area(self, label, **kwargs):
         return self.input_values.get(label, kwargs.get("value", ""))
+
+    def radio(self, label, **kwargs):
+        self.radio_calls.append((label, kwargs))
+        if label in self.input_values:
+            return self.input_values[label]
+        options = tuple(kwargs.get("options", ()))
+        index = kwargs.get("index", 0)
+        return options[index] if index is not None else None
+
+    def selectbox(self, label, options, index=0, **kwargs):
+        self.selectbox_calls.append((label, {"options": options, "index": index, **kwargs}))
+        if label in self.input_values:
+            return self.input_values[label]
+        options = tuple(options)
+        return options[index] if index is not None else None
+
+    def multiselect(self, label, options, default=None, **kwargs):
+        self.multiselect_calls.append(
+            (label, {"options": options, "default": default, **kwargs})
+        )
+        if label in self.input_values:
+            return self.input_values[label]
+        return list(default or [])
 
     def number_input(self, label, **kwargs):
         return self.input_values.get(label, kwargs.get("value"))
@@ -619,9 +645,9 @@ def test_profile_creation_passes_trusted_account_id_without_owner_field(monkeypa
         "Age": 31,
         "Weight": 72.5,
         "Height": 180.0,
-        "Gender": "unspecified",
-        "Activity level": "moderate",
-        "Goals": "Build strength",
+        "Gender": "Male",
+        "Activity Level": "Moderately Active",
+        "Goals": ["Muscle Gain"],
         "owner_account_id": "account-b",
     }
     monkeypatch.setattr(main, "st", fake_st)
@@ -649,9 +675,9 @@ def test_profile_creation_passes_trusted_account_id_without_owner_field(monkeypa
             "age": 31,
             "weight": 72.5,
             "height": 180.0,
-            "gender": "unspecified",
-            "activity_level": "moderate",
-            "goals": ["Build strength"],
+            "gender": "Male",
+            "activity_level": "Moderately Active",
+            "goals": ["Muscle Gain"],
         }
     ]
     assert "owner_account_id" not in calls[0]
@@ -668,9 +694,6 @@ def test_profile_edit_passes_trusted_account_id_and_profile_id(monkeypatch):
         "Age": 32,
         "Weight": 74.0,
         "Height": 181.0,
-        "Gender": "unspecified",
-        "Activity level": "active",
-        "Goals": "Improve endurance",
         "owner_account_id": "account-b",
     }
     monkeypatch.setattr(main, "st", fake_st)
@@ -684,7 +707,15 @@ def test_profile_edit_passes_trusted_account_id_and_profile_id(monkeypatch):
     monkeypatch.setattr(main, "_refresh_profiles", lambda select_profile_id=None: True)
 
     try:
-        main._render_profile_form(mode="edit", profile={"_id": "profile-a", "goals": []})
+        main._render_profile_form(
+            mode="edit",
+            profile={
+                "_id": "profile-a",
+                "gender": "unspecified",
+                "activity_level": "active",
+                "goals": ["Improve endurance"],
+            },
+        )
     except RerunCalled:
         pass
     else:
@@ -706,6 +737,261 @@ def test_profile_edit_passes_trusted_account_id_and_profile_id(monkeypatch):
         )
     ]
     assert "owner_account_id" not in calls[0][2]
+
+
+def test_profile_create_uses_native_choice_widgets_with_canonical_options(monkeypatch):
+    fake_st = FakeStreamlit()
+    monkeypatch.setattr(main, "st", fake_st)
+
+    main._render_profile_form(mode="create")
+
+    assert fake_st.radio_calls == [
+        (
+            "Gender",
+            {
+                "options": main.GENDER_OPTIONS,
+                "index": None,
+                "key": "create_profile_form_gender_choice",
+            },
+        )
+    ]
+    assert fake_st.selectbox_calls == [
+        (
+            "Activity Level",
+            {
+                "options": main.ACTIVITY_LEVEL_OPTIONS,
+                "index": None,
+                "key": "create_profile_form_activity_level_choice",
+                "placeholder": "Choose activity level",
+            },
+        )
+    ]
+    assert fake_st.multiselect_calls == [
+        (
+            "Goals",
+            {
+                "options": main.GOAL_OPTIONS,
+                "default": [],
+                "key": "create_profile_form_goals_multiselect",
+            },
+        )
+    ]
+
+
+def test_profile_edit_initializes_canonical_values(monkeypatch):
+    fake_st = FakeStreamlit()
+    monkeypatch.setattr(main, "st", fake_st)
+
+    main._render_profile_form(
+        mode="edit",
+        profile={
+            "_id": "profile-a",
+            "gender": "Female",
+            "activity_level": "Very Active",
+            "goals": ["Fat Loss"],
+        },
+    )
+
+    assert fake_st.radio_calls[0][1]["options"] == main.GENDER_OPTIONS
+    assert fake_st.radio_calls[0][1]["index"] == 1
+    assert fake_st.selectbox_calls[0][1]["options"] == main.ACTIVITY_LEVEL_OPTIONS
+    assert fake_st.selectbox_calls[0][1]["index"] == 3
+    assert fake_st.multiselect_calls[0][1]["options"] == main.GOAL_OPTIONS
+    assert fake_st.multiselect_calls[0][1]["default"] == ["Fat Loss"]
+
+
+def test_profile_edit_initializes_legacy_gender_activity_and_goals(monkeypatch):
+    fake_st = FakeStreamlit()
+    monkeypatch.setattr(main, "st", fake_st)
+
+    main._render_profile_form(
+        mode="edit",
+        profile={
+            "_id": "profile-a",
+            "gender": "unspecified",
+            "activity_level": "moderate",
+            "goals": ["Build strength", "Improve endurance"],
+        },
+    )
+
+    assert fake_st.radio_calls[0][1]["options"] == (
+        "unspecified",
+        "Male",
+        "Female",
+        "Other",
+    )
+    assert fake_st.radio_calls[0][1]["index"] == 0
+    assert fake_st.selectbox_calls[0][1]["options"] == (
+        "moderate",
+        "Sedentary",
+        "Lightly Active",
+        "Moderately Active",
+        "Very Active",
+        "Super Active",
+    )
+    assert fake_st.selectbox_calls[0][1]["index"] == 0
+    assert fake_st.multiselect_calls[0][1]["options"] == (
+        "Muscle Gain",
+        "Fat Loss",
+        "Stay Active",
+        "Build strength",
+        "Improve endurance",
+    )
+    assert fake_st.multiselect_calls[0][1]["default"] == [
+        "Build strength",
+        "Improve endurance",
+    ]
+
+
+def test_profile_edit_initializes_active_legacy_activity(monkeypatch):
+    fake_st = FakeStreamlit()
+    monkeypatch.setattr(main, "st", fake_st)
+
+    main._render_profile_form(
+        mode="edit",
+        profile={"_id": "profile-a", "activity_level": "active", "goals": []},
+    )
+
+    assert fake_st.selectbox_calls[0][1]["options"][0] == "active"
+    assert fake_st.selectbox_calls[0][1]["index"] == 0
+    assert "Very Active" in fake_st.selectbox_calls[0][1]["options"]
+
+
+def test_profile_edit_initializes_mixed_canonical_and_legacy_goals(monkeypatch):
+    fake_st = FakeStreamlit()
+    monkeypatch.setattr(main, "st", fake_st)
+
+    main._render_profile_form(
+        mode="edit",
+        profile={"_id": "profile-a", "goals": ["Muscle Gain", "Build strength"]},
+    )
+
+    assert fake_st.multiselect_calls[0][1]["options"] == (
+        "Muscle Gain",
+        "Fat Loss",
+        "Stay Active",
+        "Build strength",
+    )
+    assert fake_st.multiselect_calls[0][1]["default"] == ["Muscle Gain", "Build strength"]
+
+
+def test_profile_create_goal_options_do_not_include_other_profile_legacy_goals(monkeypatch):
+    fake_st = FakeStreamlit()
+    fake_st.session_state["profiles"] = [{"_id": "profile-a", "goals": ["Build strength"]}]
+    monkeypatch.setattr(main, "st", fake_st)
+
+    main._render_profile_form(mode="create")
+
+    assert fake_st.multiselect_calls[0][1]["options"] == main.GOAL_OPTIONS
+
+
+def test_profile_multiselect_submission_remains_list_without_text_parsing(monkeypatch):
+    fake_st = FakeStreamlit()
+    fake_st.submit_value = True
+    seed_authenticated_session(fake_st, account_id="account-a")
+    fake_st.input_values = {
+        "Name": "Profile A",
+        "Age": 31,
+        "Weight": 72.5,
+        "Height": 180.0,
+        "Gender": "Male",
+        "Activity Level": "Sedentary",
+        "Goals": ["Build strength\nImprove endurance"],
+    }
+    monkeypatch.setattr(main, "st", fake_st)
+    calls = []
+
+    def fake_create_new_profile(**kwargs):
+        calls.append(kwargs)
+        return "profile-new"
+
+    monkeypatch.setattr(main.profiles, "create_new_profile", fake_create_new_profile)
+    monkeypatch.setattr(main, "_refresh_profiles", lambda select_profile_id=None: True)
+
+    try:
+        main._render_profile_form(mode="create")
+    except RerunCalled:
+        pass
+    else:
+        raise AssertionError("profile creation should rerun")
+
+    assert calls[0]["goals"] == ["Build strength\nImprove endurance"]
+
+
+def test_profile_edit_saves_intentional_canonical_replacements(monkeypatch):
+    fake_st = FakeStreamlit()
+    fake_st.submit_value = True
+    seed_authenticated_session(fake_st, account_id="account-a")
+    fake_st.session_state["selected_profile_id"] = "profile-a"
+    fake_st.input_values = {
+        "Name": "Profile A",
+        "Age": 32,
+        "Weight": 74.0,
+        "Height": 181.0,
+        "Gender": "Other",
+        "Activity Level": "Very Active",
+        "Goals": ["Muscle Gain"],
+    }
+    monkeypatch.setattr(main, "st", fake_st)
+    calls = []
+
+    def fake_save_profile_changes(account_id, profile_id, **updates):
+        calls.append((account_id, profile_id, updates))
+        return {"_id": profile_id, **updates}
+
+    monkeypatch.setattr(main.profiles, "save_profile_changes", fake_save_profile_changes)
+    monkeypatch.setattr(main, "_refresh_profiles", lambda select_profile_id=None: True)
+
+    try:
+        main._render_profile_form(
+            mode="edit",
+            profile={
+                "_id": "profile-a",
+                "gender": "unspecified",
+                "activity_level": "moderate",
+                "goals": ["Build strength"],
+            },
+        )
+    except RerunCalled:
+        pass
+    else:
+        raise AssertionError("profile edit should rerun")
+
+    assert calls[0][2]["gender"] == "Other"
+    assert calls[0][2]["activity_level"] == "Very Active"
+    assert calls[0][2]["goals"] == ["Muscle Gain"]
+
+
+def test_selected_profile_change_clears_only_edit_choice_widget_state(monkeypatch):
+    fake_st = FakeStreamlit()
+    fake_st.session_state.update(
+        {
+            "selected_profile_id": "profile-a",
+            "selected_profile": {"_id": "profile-a"},
+            "profiles": [{"_id": "profile-a"}],
+            "nutrition": {"calories": 2000},
+            "last_ai_answer": "existing answer",
+            "edit_profile_form_gender_choice": "Male",
+            "edit_profile_form_activity_level_choice": "Sedentary",
+            "edit_profile_form_goals_multiselect": ["Fat Loss"],
+        }
+    )
+    monkeypatch.setattr(main, "st", fake_st)
+
+    main._set_selected_profile(
+        {
+            "_id": "profile-b",
+            "gender": "Female",
+            "activity_level": "Very Active",
+            "goals": ["Stay Active"],
+        }
+    )
+
+    assert "edit_profile_form_gender_choice" not in fake_st.session_state
+    assert "edit_profile_form_activity_level_choice" not in fake_st.session_state
+    assert "edit_profile_form_goals_multiselect" not in fake_st.session_state
+    assert fake_st.session_state["profiles"] == [{"_id": "profile-a"}]
+    assert fake_st.session_state["last_ai_answer"] == "existing answer"
 
 
 def test_nutrition_save_passes_trusted_account_id(monkeypatch):

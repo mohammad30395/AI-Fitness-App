@@ -168,3 +168,71 @@ Goals:
 
 ### Ready for UI Prompt-02
 - Yes.
+
+## UI Prompt-02 — Functional Widget Replacement
+
+### Widgets implemented
+
+Gender:
+- `st.radio`
+
+Activity Level:
+- `st.selectbox`
+
+Goals:
+- `st.multiselect`
+
+### Create-mode behavior
+- Gender uses only `GENDER_OPTIONS` and starts with no selected value by passing `index=None`, matching the old form's lack of a meaningful text default.
+- Activity Level uses only `ACTIVITY_LEVEL_OPTIONS` and starts with no selected value by passing `index=None`, matching the old form's lack of a meaningful text default.
+- Goals uses only `GOAL_OPTIONS` and starts with an empty selected list.
+- Create-mode goals do not include arbitrary legacy goals from existing profiles.
+
+### Edit-mode behavior
+- Canonical gender and activity values initialize by exact option match.
+- Legacy single-choice values are prepended to the canonical options and selected by index.
+- Existing goals initialize as the multiselect default list.
+- Legacy/custom goals are appended to the available goal options and remain selected.
+- Mixed canonical and legacy goals initialize without duplicate options.
+
+### Legacy preservation
+- `unspecified` remains an exact editable gender value and is not converted to `Other`.
+- `moderate` remains an exact editable activity value and is not converted to `Moderately Active`.
+- `active` remains an exact editable activity value and is not converted to `Very Active`.
+- `Build strength` remains an exact editable goal and is not converted to `Muscle Gain`.
+- `Improve endurance` remains an exact editable goal and is not converted to `Stay Active`.
+
+### Session-state handling
+- New target widget keys:
+  - `create_profile_form_gender_choice`
+  - `create_profile_form_activity_level_choice`
+  - `create_profile_form_goals_multiselect`
+  - `edit_profile_form_gender_choice`
+  - `edit_profile_form_activity_level_choice`
+  - `edit_profile_form_goals_multiselect`
+- The old target widget keys are no longer used for the replaced fields.
+- `_set_selected_profile()` clears only the edit-mode choice widget keys so switching selected profiles forces edit widgets to reinitialize from the selected profile instead of stale widget state.
+- Selection state such as `selected_profile_id`, `selected_profile`, `profiles`, nutrition, notes, and AI answer state is not cleared by this targeted cleanup.
+
+### Goals submission contract
+- `st.multiselect` returns a list.
+- The active submission path now passes `list(goals or [])` directly through `profiles.create_new_profile()` / `profiles.save_profile_changes()`.
+- Goals remain `list[str]` for storage and downstream profile context.
+- The active Goals submission path no longer uses the old textarea comma/newline parsing helper.
+
+### Backend impact
+- `profiles.py`: unchanged.
+- `db.py`: unchanged.
+- `ai.py`: unchanged.
+- Langflow: unchanged.
+- Astra schema: unchanged.
+
+### Tests
+- Updated `tests/test_main_resilience.py` fake Streamlit support for `radio`, `selectbox`, and `multiselect`.
+- Added coverage for create-mode canonical options and empty defaults.
+- Added coverage for edit-mode canonical initialization.
+- Added coverage for legacy gender, legacy activity values `moderate` and `active`, legacy goals, mixed canonical/legacy goals, no unrelated legacy goals in create mode, list submission without textarea parsing, intentional canonical replacements, and targeted stale-state clearing.
+- Existing `tests/test_profile_ui_options.py` continues to cover the option contract and helper behavior.
+
+### Ready for UI Prompt-03
+- Yes.
