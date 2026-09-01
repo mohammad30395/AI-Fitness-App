@@ -779,3 +779,74 @@ GENERAL
 - Application source and tests were not intentionally changed for this audit.
 - The only intended repository change for FIX Prompt-08 is this documentation update.
 - Safe verification commands are listed in the final audit response.
+
+## FIX Prompt-09 — AI Error Classification
+
+### Confirmed runtime architecture
+- Macro path remains Streamlit -> `ai.get_macros(...)` -> Langflow -> OpenRouter.
+- Ask AI path remains Streamlit -> `ai.ask_ai(...)` -> Langflow -> OpenRouter router/advice flow.
+- The application still does not call OpenRouter directly.
+
+### Proven external failure
+- Live synthetic Macro and Ask AI diagnostics reached local Langflow after it was started on `127.0.0.1:7860`.
+- Both live diagnostics failed inside Langflow because the upstream OpenRouter request reported HTTP 402.
+- The application-side classification now reports this as provider billing/quota/token-budget failure rather than a generic Langflow HTTP failure.
+
+### Error classes / categories
+- Configuration: `LangflowConfigError`.
+- Connection: `LangflowConnectionError`.
+- Timeout: `LangflowTimeoutError`.
+- Generic Langflow HTTP/graph failure: `LangflowHTTPError`.
+- Provider billing/quota/token-budget failure: `ProviderQuotaError`.
+- Response format/shape failure: `LangflowResponseError`.
+- Macro parsing failure remains a nutrition parse failure after a response is received.
+
+### Sanitization strategy
+- Langflow HTTP failures now retain `status_code`, a capped `diagnostic_summary`, and optional `provider_status`.
+- Diagnostic summaries are capped and compacted.
+- API key values, auth header values, fake secret markers, credentialed URLs, Astra-style tokens, and user IDs in provider payloads are redacted.
+- Full request payloads, prompts, profile context, auth headers, and complete response bodies are not surfaced in UI messages.
+
+### Macro UI message
+- Provider quota/billing failures display an actionable OpenRouter credit/token-budget message.
+- Macro parsing failures display a distinct message that the AI response was received but the nutrition output was not valid.
+- Generic Langflow HTTP, configuration, connection, timeout, and response-format failures remain distinguishable.
+
+### Ask AI UI message
+- Provider quota/billing failures display the same actionable OpenRouter credit/token-budget message.
+- Generic Langflow HTTP, configuration, connection, timeout, and response-format failures remain distinguishable.
+- Raw exception class names and provider payloads are not the primary user-facing explanation.
+
+### Live Macro diagnostic
+- Safe synthetic macro diagnostic was run against local Langflow.
+- Result: `ProviderQuotaError`.
+- Langflow status: 500.
+- Provider status: 402.
+- Successful macro generation remains blocked by the external OpenRouter credit/token-budget condition.
+
+### Live Ask AI diagnostic
+- Safe synthetic Ask AI diagnostic was run against local Langflow with non-real account/profile/session IDs.
+- Result: `ProviderQuotaError`.
+- Langflow status: 500.
+- Provider status: 402.
+- Successful Ask AI generation remains blocked by the external OpenRouter credit/token-budget condition.
+
+### Provider remediation required
+- The user must either ensure the OpenRouter account/key used by Langflow has sufficient usable credit/budget, or reduce the configured model output/max-token budget in the relevant Langflow OpenRouter component.
+- No numeric token setting was chosen automatically.
+- No model switch, OpenRouter account change, or Langflow flow edit was made.
+
+### External blocker status
+- AI application error handling: PASS.
+- Live AI provider success: BLOCKED BY OPENROUTER 402.
+
+### Backend impact
+- `profiles.py`: unchanged.
+- `db.py`: unchanged.
+- Astra schema/data: unchanged.
+- Langflow flow JSON: unchanged.
+- Flow IDs/component IDs: unchanged.
+- Requirements/dependencies: unchanged.
+
+### Ready for FIX Prompt-10
+- yes, after final Prompt-09 verification remains green.

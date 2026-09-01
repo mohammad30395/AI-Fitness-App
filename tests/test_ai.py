@@ -63,11 +63,20 @@ def langflow_success_response(text='{"calories": 2200, "protein": 150, "fat": 70
 
 
 class FakeResponse:
-    def __init__(self, *, json_data=None, status_code=200, json_exc=None, http_exc=None):
+    def __init__(
+        self,
+        *,
+        json_data=None,
+        status_code=200,
+        json_exc=None,
+        http_exc=None,
+        text="",
+    ):
         self._json_data = json_data
         self.status_code = status_code
         self._json_exc = json_exc
         self._http_exc = http_exc
+        self.text = text
 
     def raise_for_status(self):
         if self._http_exc:
@@ -77,6 +86,19 @@ class FakeResponse:
         if self._json_exc:
             raise self._json_exc
         return self._json_data
+
+
+def provider_402_payload():
+    return {
+        "detail": (
+            "Error running graph: Error building Component OpenRouter: "
+            "Error code: 402 - {'error': {'message': 'This request requires more "
+            "credits, or fewer max_tokens to be set.', 'code': 402, 'metadata': "
+            "{'provider_name': None}}, 'user_id': 'user-secret-id', "
+            "'x-api-key': 'FAKE_LANGFLOW_SECRET_DO_NOT_LEAK', "
+            "'authorization': 'FAKE_OPENROUTER_SECRET_DO_NOT_LEAK'}"
+        )
+    }
 
 
 def test_run_flow_success_posts_current_langflow_contract(monkeypatch):
@@ -152,6 +174,147 @@ def test_run_flow_http_errors_call_raise_for_status(monkeypatch, status_code):
     assert str(status_code) in str(exc_info.value)
     assert "secret-langflow-key" not in str(exc_info.value)
     assert exc_info.value.__cause__ is http_error
+    assert exc_info.value.status_code == status_code
+    assert exc_info.value.provider_status is None
+
+
+def test_run_flow_provider_402_from_langflow_500_is_classified_safely(monkeypatch):
+    patch_langflow_config(monkeypatch)
+    http_error = requests.HTTPError("500 Server Error")
+
+    def fake_post(url, *, headers, json, timeout):
+        return FakeResponse(
+            json_data=provider_402_payload(),
+            status_code=500,
+            http_exc=http_error,
+        )
+
+    monkeypatch.setattr(ai.requests, "post", fake_post)
+
+    with pytest.raises(ai.ProviderQuotaError) as exc_info:
+        ai.run_flow("flow-123", "profile context containing private goals")
+
+    error = exc_info.value
+    message = str(error)
+    diagnostic = error.diagnostic_summary
+    assert error.status_code == 500
+    assert error.provider_status == 402
+    assert "provider billing/quota" in message
+    assert "profile context containing private goals" not in message
+    assert "profile context containing private goals" not in diagnostic
+    assert "FAKE_LANGFLOW_SECRET_DO_NOT_LEAK" not in message
+    assert "FAKE_OPENROUTER_SECRET_DO_NOT_LEAK" not in message
+    assert "FAKE_LANGFLOW_SECRET_DO_NOT_LEAK" not in diagnostic
+    assert "FAKE_OPENROUTER_SECRET_DO_NOT_LEAK" not in diagnostic
+    assert "x-api-key" not in message.lower()
+    assert "authorization" not in message.lower()
+    assert "x-api-key" not in diagnostic.lower()
+    assert "authorization" not in diagnostic.lower()
+    assert "user-secret-id" not in diagnostic
+    assert len(diagnostic) <= ai.MAX_HTTP_ERROR_DIAGNOSTIC_CHARS
+
+
+@pytest.mark.parametrize(
+    ("status_code", "payload"),
+    [
+        (401, {"detail": "Unauthorized Langflow request."}),
+        (403, {"detail": "Forbidden Langflow request."}),
+        (404, {"detail": "Flow not found."}),
+        (500, {"detail": "Error running graph without provider quota evidence."}),
+    ],
+)
+def test_run_flow_http_errors_do_not_false_positive_provider_quota(
+    monkeypatch,
+    status_code,
+    payload,
+):
+    patch_langflow_config(monkeypatch)
+    http_error = requests.HTTPError(f"{status_code} Error")
+
+    def fake_post(url, *, headers, json, timeout):
+        return FakeResponse(json_data=payload, status_code=status_code, http_exc=http_error)
+
+    monkeypatch.setattr(ai.requests, "post", fake_post)
+
+    with pytest.raises(ai.LangflowHTTPError) as exc_info:
+        ai.run_flow("flow-123", "profile context")
+
+    assert not isinstance(exc_info.value, ai.ProviderQuotaError)
+    assert exc_info.value.status_code == status_code
+    assert exc_info.value.provider_status is None
+
+
+def test_run_flow_http_error_non_json_body_is_sanitized_and_capped(monkeypatch):
+    patch_langflow_config(monkeypatch)
+    http_error = requests.HTTPError("500 Server Error")
+    body = (
+        "internal failure FAKE_LANGFLOW_SECRET_DO_NOT_LEAK "
+        "Authorization: FAKE_OPENROUTER_SECRET_DO_NOT_LEAK "
+        + ("body-detail " * 80)
+    )
+
+    def fake_post(url, *, headers, json, timeout):
+        return FakeResponse(
+            status_code=500,
+            http_exc=http_error,
+            json_exc=ValueError("not json"),
+            text=body,
+        )
+
+    monkeypatch.setattr(ai.requests, "post", fake_post)
+
+    with pytest.raises(ai.LangflowHTTPError) as exc_info:
+        ai.run_flow("flow-123", "profile context")
+
+    message = str(exc_info.value)
+    diagnostic = exc_info.value.diagnostic_summary
+    assert "FAKE_LANGFLOW_SECRET_DO_NOT_LEAK" not in message
+    assert "FAKE_OPENROUTER_SECRET_DO_NOT_LEAK" not in message
+    assert "FAKE_LANGFLOW_SECRET_DO_NOT_LEAK" not in diagnostic
+    assert "FAKE_OPENROUTER_SECRET_DO_NOT_LEAK" not in diagnostic
+    assert "authorization" not in diagnostic.lower()
+    assert len(diagnostic) <= ai.MAX_HTTP_ERROR_DIAGNOSTIC_CHARS
+    assert len(diagnostic) < len(body)
+
+
+def test_get_macros_preserves_provider_quota_classification(monkeypatch):
+    patch_macro_config(monkeypatch)
+    error = ai.ProviderQuotaError(
+        "Langflow HTTP request failed with status 500. Upstream provider HTTP 402.",
+        status_code=500,
+        diagnostic_summary="OpenRouter 402 requires more credits",
+        provider_status=402,
+    )
+
+    def fake_run_flow(flow_id, input_value, **kwargs):
+        raise error
+
+    monkeypatch.setattr(ai, "run_flow", fake_run_flow)
+
+    with pytest.raises(ai.ProviderQuotaError) as exc_info:
+        ai.get_macros("profile context", "build strength")
+
+    assert exc_info.value.provider_status == 402
+
+
+def test_ask_ai_preserves_provider_quota_classification(monkeypatch):
+    patch_ask_ai_config(monkeypatch)
+    error = ai.ProviderQuotaError(
+        "Langflow HTTP request failed with status 500. Upstream provider HTTP 402.",
+        status_code=500,
+        diagnostic_summary="OpenRouter 402 requires more credits",
+        provider_status=402,
+    )
+
+    def fake_run_flow(flow_id, input_value, **kwargs):
+        raise error
+
+    monkeypatch.setattr(ai, "run_flow", fake_run_flow)
+
+    with pytest.raises(ai.ProviderQuotaError) as exc_info:
+        ai.ask_ai("What next?", "profile context", "account-1", "profile-1")
+
+    assert exc_info.value.provider_status == 402
 
 
 def test_run_flow_timeout_propagates_without_secret(monkeypatch):

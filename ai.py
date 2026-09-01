@@ -15,6 +15,25 @@ from utils import parse_nutrition_json
 DEFAULT_INPUT_TYPE = "chat"
 DEFAULT_OUTPUT_TYPE = "chat"
 DEFAULT_TIMEOUT_SECONDS = 60.0
+MAX_HTTP_ERROR_DIAGNOSTIC_CHARS = 320
+
+_PROVIDER_QUOTA_TERMS = (
+    "insufficient credit",
+    "requires more credits",
+    "more credit",
+    "payment required",
+    "quota",
+    "billing",
+    "token budget",
+    "max_tokens",
+)
+
+_PROVIDER_CUES = (
+    "openrouter",
+    "provider",
+    "upstream",
+    "max_tokens",
+)
 
 
 class LangflowClientError(Exception):
@@ -31,6 +50,24 @@ class LangflowResponseError(LangflowClientError):
 
 class LangflowHTTPError(LangflowClientError):
     """Raised when Langflow returns a non-success HTTP status."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        status_code: int | None = None,
+        diagnostic_summary: str = "",
+        provider_status: int | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+        self.diagnostic_summary = diagnostic_summary
+        self.provider_status = provider_status
+
+
+class ProviderQuotaError(LangflowHTTPError):
+    """Raised when Langflow reports an upstream provider quota/billing failure."""
+
 
 
 class LangflowTimeoutError(LangflowClientError):
@@ -49,8 +86,110 @@ def _sanitize_diagnostic(message: Any) -> str:
             sanitized = sanitized.replace(value, f"<redacted:{name}>")
     sanitized = re.sub(r"AstraCS:[A-Za-z0-9._:-]+", "AstraCS:<redacted>", sanitized)
     sanitized = re.sub(r"sk-[A-Za-z0-9_-]+", "sk-<redacted>", sanitized)
+    sanitized = re.sub(r"FAKE_[A-Z0-9_]*SECRET[A-Z0-9_]*", "<redacted:secret>", sanitized)
     sanitized = re.sub(r"(https?://)[^/\s:@]+:[^/\s@]+@", r"\1<redacted>@", sanitized)
+    sanitized = re.sub(
+        r"(?i)['\"]?\b(x-api-key|authorization|api[_-]?key|token|secret|password)\b['\"]?"
+        r"\s*[:=]\s*['\"]?[^,'\"\s}]+['\"]?",
+        "<redacted:secret_field>",
+        sanitized,
+    )
+    sanitized = re.sub(
+        r"(?i)([?&](?:api[_-]?key|apikey|token|secret|password|signature|access_token)=)[^&\s]+",
+        r"\1<redacted>",
+        sanitized,
+    )
+    sanitized = re.sub(
+        r"(?i)(['\"]?user_id['\"]?\s*:\s*['\"])[^'\"]+(['\"])",
+        r"\1<redacted:user_id>\2",
+        sanitized,
+    )
     return sanitized
+
+
+def _compact_diagnostic(message: Any, *, limit: int = MAX_HTTP_ERROR_DIAGNOSTIC_CHARS) -> str:
+    sanitized = _sanitize_diagnostic(message)
+    compacted = re.sub(r"\s+", " ", sanitized).strip()
+    if len(compacted) <= limit:
+        return compacted
+    return f"{compacted[: limit - 3].rstrip()}..."
+
+
+def _summarize_error_mapping(data: Mapping[str, Any]) -> str:
+    parts: list[str] = []
+    for key in ("message", "detail", "code", "type"):
+        value = data.get(key)
+        if isinstance(value, (str, int, float)):
+            parts.append(f"{key}: {value}")
+    if parts:
+        return "; ".join(parts)
+    return _top_level_preview(data)
+
+
+def _extract_http_error_summary(response: Any) -> str:
+    try:
+        data = response.json()
+    except ValueError:
+        body = getattr(response, "text", "")
+        if body:
+            return _compact_diagnostic(f"non-JSON error response: {body}")
+        return "non-JSON error response"
+
+    if isinstance(data, Mapping):
+        parts: list[str] = []
+        for key in ("detail", "message", "error"):
+            value = data.get(key)
+            if isinstance(value, (str, int, float)):
+                parts.append(f"{key}: {value}")
+            elif isinstance(value, Mapping):
+                parts.append(f"{key}: {_summarize_error_mapping(value)}")
+        if parts:
+            return _compact_diagnostic(" | ".join(parts))
+        return _compact_diagnostic(_top_level_preview(data))
+
+    return _compact_diagnostic(_top_level_preview(data))
+
+
+def _detect_provider_quota_status(summary: str) -> int | None:
+    lowered = summary.lower()
+    has_status_402 = bool(
+        re.search(r"\b(?:http|status|code|error code)\D{0,20}402\b", lowered)
+        or re.search(r"\b402\b", lowered)
+    )
+    has_quota_evidence = any(term in lowered for term in _PROVIDER_QUOTA_TERMS)
+    has_provider_evidence = any(cue in lowered for cue in _PROVIDER_CUES)
+    if has_status_402 and has_quota_evidence and has_provider_evidence:
+        return 402
+    return None
+
+
+def _build_http_error(response: Any, exc: requests.HTTPError) -> LangflowHTTPError:
+    status_code = getattr(response, "status_code", None)
+    if status_code is None and getattr(exc, "response", None) is not None:
+        status_code = getattr(exc.response, "status_code", None)
+
+    status_label = status_code if status_code is not None else "unknown"
+    summary = _extract_http_error_summary(response) if response is not None else ""
+    provider_status = _detect_provider_quota_status(summary)
+    if provider_status == 402:
+        return ProviderQuotaError(
+            (
+                f"Langflow HTTP request failed with status {status_label}. "
+                "Upstream provider HTTP 402: provider billing/quota or token budget restriction."
+            ),
+            status_code=status_code,
+            diagnostic_summary=summary,
+            provider_status=provider_status,
+        )
+
+    message = f"Langflow HTTP request failed with status {status_label}."
+    if summary:
+        message = f"{message} Sanitized detail: {summary}"
+    return LangflowHTTPError(
+        message,
+        status_code=status_code,
+        diagnostic_summary=summary,
+    )
 
 
 def _require_config_value(name: str) -> str:
@@ -208,13 +347,7 @@ def run_flow(
             f"Langflow request timed out after {timeout_value:g} seconds."
         ) from exc
     except requests.HTTPError as exc:
-        status_code = getattr(response, "status_code", None)
-        if status_code is None and getattr(exc, "response", None) is not None:
-            status_code = getattr(exc.response, "status_code", None)
-        status_label = status_code if status_code is not None else "unknown"
-        raise LangflowHTTPError(
-            f"Langflow HTTP request failed with status {status_label}."
-        ) from exc
+        raise _build_http_error(response, exc) from exc
     except requests.RequestException as exc:
         raise LangflowConnectionError(
             f"Langflow request failed ({type(exc).__name__}): "

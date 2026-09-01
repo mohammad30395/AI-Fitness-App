@@ -9,6 +9,7 @@ import auth
 import config
 import db
 import profiles
+from utils import NutritionParseError
 
 
 logger = logging.getLogger(__name__)
@@ -147,7 +148,14 @@ def _sanitize_diagnostic(message: str) -> str:
             sanitized = sanitized.replace(value, f"<redacted:{name}>")
     sanitized = re.sub(r"AstraCS:[A-Za-z0-9._:-]+", "<redacted:ASTRA_TOKEN>", sanitized)
     sanitized = re.sub(r"sk-[A-Za-z0-9._-]+", "<redacted:API_KEY>", sanitized)
+    sanitized = re.sub(r"FAKE_[A-Z0-9_]*SECRET[A-Z0-9_]*", "<redacted:secret>", sanitized)
     sanitized = re.sub(r"(https?://)([^/@\s]+):([^/@\s]+)@", r"\1<redacted>@", sanitized)
+    sanitized = re.sub(
+        r"(?i)['\"]?\b(x-api-key|authorization|api[_-]?key|token|secret|password)\b['\"]?"
+        r"\s*[:=]\s*['\"]?[^,'\"\s}]+['\"]?",
+        "<redacted:secret_field>",
+        sanitized,
+    )
     return sanitized
 
 
@@ -687,6 +695,11 @@ def _safe_profile_error(action: str, error: Exception) -> str:
 
 
 def _safe_macro_error(action: str, error: Exception) -> str:
+    ai_message = _safe_ai_error_message(action, error)
+    if ai_message:
+        return ai_message
+    if isinstance(error, NutritionParseError):
+        return f"{action} failed: The AI response was received but the nutrition output was not valid."
     return f"{action} failed ({type(error).__name__}). Check Langflow configuration and macro output."
 
 
@@ -695,7 +708,39 @@ def _safe_notes_error(action: str, error: Exception) -> str:
 
 
 def _safe_ask_ai_error(action: str, error: Exception) -> str:
+    ai_message = _safe_ai_error_message(action, error)
+    if ai_message:
+        return ai_message
     return f"{action} failed ({type(error).__name__}). Check Langflow Ask AI configuration and try again."
+
+
+def _safe_ai_error_message(action: str, error: Exception) -> str | None:
+    if isinstance(error, ai.ProviderQuotaError):
+        return (
+            f"{action} failed: AI provider request was rejected because the OpenRouter "
+            "credit/token budget is insufficient. Add OpenRouter credit or reduce the "
+            "model's max-token setting in Langflow, then try again."
+        )
+    if isinstance(error, ai.LangflowConfigError):
+        return (
+            f"{action} failed: AI configuration is incomplete. "
+            "Check the required Langflow configuration."
+        )
+    if isinstance(error, ai.LangflowConnectionError):
+        return (
+            f"{action} failed: Langflow could not be reached. "
+            "Confirm the local Langflow server is running."
+        )
+    if isinstance(error, ai.LangflowTimeoutError):
+        return (
+            f"{action} failed: The AI request timed out. "
+            "Try again or check the Langflow flow."
+        )
+    if isinstance(error, ai.LangflowHTTPError):
+        return f"{action} failed: Langflow could not complete the AI workflow."
+    if isinstance(error, ai.LangflowResponseError):
+        return f"{action} failed: Langflow returned an unexpected response format."
+    return None
 
 
 def _profile_label(profile_id) -> str:

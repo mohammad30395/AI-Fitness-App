@@ -1,3 +1,5 @@
+import pytest
+
 import main
 
 
@@ -2344,6 +2346,116 @@ def test_safe_ui_errors_are_user_friendly_without_low_level_details():
     assert "AstraCS" not in main._safe_notes_error("Loading notes", error)
     assert "AstraCS" not in main._safe_macro_error("Generating macros", error)
     assert "AstraCS" not in main._safe_ask_ai_error("Ask AI", error)
+
+
+def test_ai_provider_quota_errors_show_actionable_macro_and_ask_messages():
+    error = main.ai.ProviderQuotaError(
+        "Langflow HTTP request failed with status 500. Upstream provider HTTP 402.",
+        status_code=500,
+        diagnostic_summary="detail: OpenRouter 402 requires more credits or fewer max_tokens",
+        provider_status=402,
+    )
+
+    macro_message = main._safe_macro_error("Generating macros", error)
+    ask_message = main._safe_ask_ai_error("Ask AI", error)
+
+    for message in (macro_message, ask_message):
+        assert "OpenRouter credit/token budget is insufficient" in message
+        assert "Add OpenRouter credit" in message
+        assert "max-token setting in Langflow" in message
+        assert "ProviderQuotaError" not in message
+        assert "LangflowHTTPError" not in message
+        assert "402" not in message
+
+
+@pytest.mark.parametrize(
+    ("error", "expected"),
+    [
+        (
+            main.ai.LangflowConfigError("Missing required environment variable: LANGFLOW_API_KEY"),
+            "AI configuration is incomplete",
+        ),
+        (
+            main.ai.LangflowConnectionError("connection refused"),
+            "Langflow could not be reached",
+        ),
+        (
+            main.ai.LangflowTimeoutError("timeout"),
+            "AI request timed out",
+        ),
+        (
+            main.ai.LangflowHTTPError("Langflow HTTP request failed with status 500."),
+            "Langflow could not complete the AI workflow",
+        ),
+        (
+            main.ai.LangflowResponseError("unexpected shape"),
+            "Langflow returned an unexpected response format",
+        ),
+        (
+            main.NutritionParseError("Nutrition output is not valid JSON."),
+            "nutrition output was not valid",
+        ),
+    ],
+)
+def test_macro_error_messages_distinguish_ai_failure_categories(error, expected):
+    message = main._safe_macro_error("Generating macros", error)
+
+    assert expected in message
+    assert type(error).__name__ not in message
+
+
+@pytest.mark.parametrize(
+    ("error", "expected"),
+    [
+        (
+            main.ai.LangflowConfigError("Missing required environment variable: LANGFLOW_API_KEY"),
+            "AI configuration is incomplete",
+        ),
+        (
+            main.ai.LangflowConnectionError("connection refused"),
+            "Langflow could not be reached",
+        ),
+        (
+            main.ai.LangflowTimeoutError("timeout"),
+            "AI request timed out",
+        ),
+        (
+            main.ai.LangflowHTTPError("Langflow HTTP request failed with status 500."),
+            "Langflow could not complete the AI workflow",
+        ),
+        (
+            main.ai.LangflowResponseError("unexpected shape"),
+            "Langflow returned an unexpected response format",
+        ),
+    ],
+)
+def test_ask_ai_error_messages_distinguish_ai_failure_categories(error, expected):
+    message = main._safe_ask_ai_error("Ask AI", error)
+
+    assert expected in message
+    assert type(error).__name__ not in message
+
+
+def test_ai_safe_messages_do_not_expose_secret_markers_or_headers():
+    error = main.ai.LangflowHTTPError(
+        "Langflow HTTP request failed with status 500. "
+        "x-api-key: FAKE_LANGFLOW_SECRET_DO_NOT_LEAK "
+        "Authorization: FAKE_OPENROUTER_SECRET_DO_NOT_LEAK",
+        status_code=500,
+        diagnostic_summary=(
+            "detail: FAKE_LANGFLOW_SECRET_DO_NOT_LEAK "
+            "FAKE_OPENROUTER_SECRET_DO_NOT_LEAK"
+        ),
+    )
+
+    macro_message = main._safe_macro_error("Generating macros", error)
+    ask_message = main._safe_ask_ai_error("Ask AI", error)
+
+    for message in (macro_message, ask_message):
+        assert "FAKE_LANGFLOW_SECRET_DO_NOT_LEAK" not in message
+        assert "FAKE_OPENROUTER_SECRET_DO_NOT_LEAK" not in message
+        assert "x-api-key" not in message.lower()
+        assert "authorization" not in message.lower()
 
 
 def test_profile_validation_errors_show_actionable_field_message():
