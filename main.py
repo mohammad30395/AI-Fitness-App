@@ -397,12 +397,6 @@ def _render_theme_button() -> None:
     )
 
 
-def _render_theme_control() -> None:
-    _, control_col = st.columns((6, 1), vertical_alignment="center")
-    with control_col:
-        _render_theme_button()
-
-
 def _initialize_auth_session_state() -> None:
     for key, value in AUTH_SESSION_DEFAULTS.items():
         if key not in st.session_state:

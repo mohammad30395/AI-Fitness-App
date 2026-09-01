@@ -485,26 +485,27 @@ def test_ui_theme_toggle_does_not_call_profile_or_ai_backends(monkeypatch):
     assert fake_st.session_state[main.UI_THEME_SESSION_KEY] == "dark"
 
 
-def test_ui_theme_control_uses_top_right_button_and_callback(monkeypatch):
+def test_authenticated_header_uses_theme_button_callback(monkeypatch):
     fake_st = FakeStreamlit()
+    fake_st.private_ui_allowed = True
     fake_st.session_state[main.UI_THEME_SESSION_KEY] = "light"
     fake_st.button_values["ui_theme_toggle"] = True
+    seed_authenticated_session(fake_st)
     monkeypatch.setattr(main, "st", fake_st)
 
-    main._render_theme_control()
+    main._render_authenticated_header()
 
-    assert fake_st.columns_calls == [((6, 1), {"vertical_alignment": "center"})]
-    assert fake_st.button_calls == [
-        (
-            "🌙 Dark",
-            {
-                "key": "ui_theme_toggle",
-                "help": "Switch to dark mode",
-                "on_click": main._toggle_ui_theme,
-                "use_container_width": True,
-            },
-        )
-    ]
+    assert fake_st.columns_calls == [((4, 2, 1, 1.6, 1), {"vertical_alignment": "center"})]
+    theme_button = fake_st.button_calls[0]
+    assert theme_button == (
+        "🌙 Dark",
+        {
+            "key": "ui_theme_toggle",
+            "help": "Switch to dark mode",
+            "on_click": main._toggle_ui_theme,
+            "use_container_width": True,
+        },
+    )
     assert fake_st.session_state[main.UI_THEME_SESSION_KEY] == "dark"
 
 

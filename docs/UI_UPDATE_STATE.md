@@ -1036,3 +1036,203 @@ GENERAL
 
 ### Ready for FIX Prompt-13
 - not started.
+
+### FIX Prompt-13 Manual Browser Sign-Off Checklist
+
+HEADER
+
+[ ] Theme is visible
+[ ] Create Profile is visible
+[ ] Logout is visible
+[ ] order is Theme -> Create Profile -> Logout
+[ ] Logout is furthest right
+[ ] app controls do not collide with Streamlit Deploy/menu
+
+LIGHT MODE
+
+[ ] page is clearly light
+[ ] header buttons readable
+[ ] profile summary readable
+[ ] inputs readable
+[ ] + readable
+[ ] − readable
+[ ] − tooltip readable
+[ ] + tooltip readable
+[ ] focus states visible
+
+DARK MODE
+
+[ ] page is clearly dark
+[ ] header buttons readable
+[ ] profile summary readable
+[ ] inputs readable
+[ ] + readable
+[ ] − readable
+[ ] − tooltip readable
+[ ] + tooltip readable
+[ ] focus states visible
+
+PROFILE VIEW
+
+[ ] selecting a profile shows summary
+[ ] Name visible
+[ ] Age visible
+[ ] Weight visible
+[ ] Height visible
+[ ] Gender visible
+[ ] Activity Level visible
+[ ] Goals visible
+[ ] edit fields are NOT immediately shown
+[ ] internal profile ID is not prominent
+
+PROFILE EDIT
+
+[ ] Edit Profile opens editable form
+[ ] Gender radio correct
+[ ] Activity selectbox correct
+[ ] Goals +/− editor correct
+[ ] unsaved edits survive theme toggle
+[ ] Cancel returns to saved summary
+[ ] Save returns to updated summary
+
+PROFILE CREATE
+
+[ ] top-right Create Profile opens create form
+[ ] default Muscle Gain appears once
+[ ] Muscle Gain can be removed
+[ ] removed default stays removed
+[ ] custom goal can be added
+[ ] blank rejected
+[ ] duplicate rejected
+[ ] Back/cancel does not persist
+[ ] successful create returns to profile summary
+
+PROFILE SWITCHING
+
+[ ] A -> B shows B summary
+[ ] B -> A shows A summary
+[ ] unsaved edit from A does not appear in B
+[ ] switching while editing does not auto-save
+
+AI
+
+[ ] Generate with AI shows actionable OpenRouter message while 402 persists
+[ ] Ask AI shows actionable OpenRouter message while 402 persists
+
+If provider issue is manually fixed:
+
+[ ] Macro generation succeeds
+[ ] Ask AI succeeds
+
+GENERAL
+
+[ ] Nutrition UI still works
+[ ] Notes UI still works
+[ ] Ask AI UI still works
+[ ] Logout works
+[ ] no obvious horizontal overflow
+[ ] no duplicated labels/buttons
+[ ] no unreadable tooltip
+[ ] no obviously broken Light/Dark styles
+
+## FIX Prompt-13 — Final Corrective Acceptance
+
+### Final fixed scope
+- Final integrated regression covered FIX Prompts 09-12 together.
+- One dead staged UI helper, `_render_theme_control()`, was removed because the active header now owns the only theme action path.
+- No new feature was added.
+
+### Header acceptance
+- The active authenticated header is one native `st.columns((4, 2, 1, 1.6, 1), vertical_alignment="center")` row.
+- Right-side action order remains Theme -> Create Profile -> Logout.
+- Logout is the last application action in the row.
+- No Streamlit toolbar hiding, fixed/absolute overlay, JavaScript, or generated class selector is used.
+
+### Profile view/edit/create acceptance
+- Profile UI modes remain `view`, `edit`, and `create`.
+- Selected authenticated profiles default to `view`.
+- Edit Profile enters `edit` without persistence.
+- Cancel and successful Save return to `view`.
+- Header Create Profile enters `create` without persistence.
+- Back/cancel create and successful create return to `view`.
+- Profile switching returns to `view` and clears stale edit-specific state.
+- Edit mode with no selected profile is normalized back to `view`.
+
+### Goals acceptance
+- New create forms initialize `["Muscle Gain"]` once per fresh create editor state.
+- Removing the starter goal keeps it removed across reruns and theme toggles.
+- Existing profiles load stored goals exactly.
+- Arbitrary custom goals remain supported as `list[str]`.
+- Blank additions are rejected, exact duplicates are rejected, and all goals may be removed.
+- Goal add/remove controls remain temporary session-state actions until Create Profile or Save Changes.
+
+### Tooltip acceptance
+- Goal `+`, `Add Goal`, and `−` controls use native Streamlit `help`.
+- Tooltip styling is scoped to verified `[role="tooltip"]` for installed Streamlit 1.61.1.
+- Light and dark tooltip tokens satisfy the tested readable contrast target.
+- No generated/hash selector, nth-child hack, JavaScript, or custom tooltip HTML was added.
+- Tooltip help text does not expose profile IDs, account IDs, widget keys, or session keys.
+
+### Theme acceptance
+- `ui_theme` defaults to `light`, preserves valid values, and normalizes invalid values to `light`.
+- Toggle behavior remains `light -> dark` and `dark -> light`.
+- Theme toggles preserve authentication, selected profile, profile mode, temporary create/edit Goals, nutrition, notes, and Ask AI state.
+- No private Streamlit theme API or runtime `config.toml` mutation is used.
+
+### AI error-handling acceptance
+- Runtime architecture remains Streamlit -> `ai.py` -> Langflow -> OpenRouter.
+- Upstream OpenRouter 402 evidence inside Langflow HTTP 500 is classified as `ProviderQuotaError`.
+- Macro and Ask AI user messages explain the OpenRouter credit/token budget issue without raw exception, key, header, or payload leaks.
+- 401/403/404/generic 500, timeout, connection, and response-shape errors remain separate categories.
+
+### External OpenRouter status
+- Local Langflow reachability was confirmed at `http://127.0.0.1:7860`.
+- Live OpenRouter success was not re-tested during this final milestone.
+- OpenRouter provider HTTP 402 is an external provider/account/token-budget condition if still present.
+- The application should not be called defective solely because provider billing or token budget remains blocked.
+
+### Nutrition regression
+- Existing tests verify Nutrition section rendering, `ai.get_macros` usage, ProviderQuotaError message mapping, and manual nutrition save behavior.
+- No Goal/header/profile change altered the Nutrition persistence path.
+
+### Notes regression
+- Existing tests verify Notes rendering guards, add behavior, delete behavior, and account/profile isolation.
+- No destructive live note test was performed.
+
+### Ask AI regression
+- Existing tests verify Ask AI rendering guards, selected profile context, account/profile/session arguments, flow/tweak path, ProviderQuotaError message mapping, and state preservation across theme toggles.
+
+### Authentication/logout regression
+- Existing tests verify logout clears authenticated/session state according to the current contract and does not trigger profile, notes, or AI backends.
+
+### Safe test discovery
+- Test files in `tests/` are safe unit/mock/local tests.
+- Astra, Langflow, and OpenRouter clients are faked or monkeypatched in test code.
+- No external/live or destructive tests were skipped from the safe suite.
+
+### Automated verification
+- Focused acceptance tests: 142 passed.
+- Full safe suite: 367 passed.
+- Compile verification: passed.
+- `git diff --check`: passed.
+- Static safety search: expected stable selectors, secret variable names, test assertions, and docs only.
+
+### Startup verification
+- Headless Streamlit startup on `127.0.0.1:8504` started successfully.
+- HTTP endpoint responded with `200 OK`.
+- No immediate Python exception was observed.
+- The smoke process was stopped after verification.
+
+### Static safety review
+- No conflict markers, breakpoints, `pdb.set_trace`, active debug hooks, JavaScript injection, private Streamlit theme API, generated class selector, toolbar hiding, or fixed/absolute overlay were found in runtime code.
+- Secret-related variable/header names are used for normal configuration, auth construction, sanitization, or tests.
+- No evidence was found that secrets or raw sensitive payloads are dumped to users.
+
+### Manual Browser Sign-Off Checklist
+- Checklist is recorded above under `### FIX Prompt-13 Manual Browser Sign-Off Checklist`.
+- Authenticated browser sign-off remains pending.
+
+### Remaining limitations
+- Authenticated visual browser checks remain manual because browser automation was unavailable in this Codex session and no authenticated user session was provided.
+- Live AI success depends on Langflow/OpenRouter provider account state.
+- OpenRouter provider HTTP 402 remains an external provider/account/token-budget limitation if it still occurs.
