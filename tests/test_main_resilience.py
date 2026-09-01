@@ -346,6 +346,16 @@ def test_ui_theme_persists_across_initialization_reruns(monkeypatch):
     assert fake_st.session_state[main.UI_THEME_SESSION_KEY] == "dark"
 
 
+def test_invalid_ui_theme_state_normalizes_to_light(monkeypatch):
+    fake_st = FakeStreamlit()
+    fake_st.session_state[main.UI_THEME_SESSION_KEY] = "sepia"
+    monkeypatch.setattr(main, "st", fake_st)
+
+    main._initialize_ui_theme_state()
+
+    assert fake_st.session_state[main.UI_THEME_SESSION_KEY] == "light"
+
+
 def test_ui_theme_toggle_preserves_profile_and_workflow_state(monkeypatch):
     fake_st = FakeStreamlit()
     selected_profile = {"_id": "profile-a", "name": "A", "goals": ["Fat Loss"]}
@@ -1208,6 +1218,55 @@ def test_goal_editor_adds_multiple_custom_goals(monkeypatch):
     ]
 
 
+def test_final_new_profile_goal_acceptance_flow_and_theme_preservation(monkeypatch):
+    fake_st = FakeStreamlit()
+    monkeypatch.setattr(main, "st", fake_st)
+
+    def fail_persistence(*args, **kwargs):
+        raise AssertionError("non-submit goal/theme actions must not persist")
+
+    monkeypatch.setattr(main.profiles, "create_new_profile", fail_persistence)
+    monkeypatch.setattr(main.profiles, "save_profile_changes", fail_persistence)
+    monkeypatch.setattr(main.db, "create_profile", fail_persistence)
+    monkeypatch.setattr(main.db, "update_personal_information", fail_persistence)
+
+    state_key = main._initialize_goal_editor_state(
+        form_key="create_profile_form",
+        is_edit=False,
+    )
+    assert fake_st.session_state[state_key] == ["Muscle Gain"]
+
+    main._remove_goal_from_editor(state_key, 0, "goal_error")
+    assert fake_st.session_state[state_key] == []
+
+    rerun_state_key = main._initialize_goal_editor_state(
+        form_key="create_profile_form",
+        is_edit=False,
+    )
+    assert rerun_state_key == state_key
+    assert fake_st.session_state[state_key] == []
+
+    for goal in ("Fat Loss", "Run a half marathon", "Improve flexibility"):
+        fake_st.session_state["goal_input"] = goal
+        main._add_goal_to_editor(state_key, "goal_input", "goal_error", "goal_add_open")
+
+    fake_st.session_state["goal_input"] = "   "
+    main._add_goal_to_editor(state_key, "goal_input", "goal_error", "goal_add_open")
+    assert fake_st.session_state["goal_error"] == "Enter a goal before adding."
+
+    fake_st.session_state["goal_input"] = "Fat Loss"
+    main._add_goal_to_editor(state_key, "goal_input", "goal_error", "goal_add_open")
+    assert fake_st.session_state["goal_error"] == "That goal is already in the list."
+
+    main._remove_goal_from_editor(state_key, 2, "goal_error")
+    assert fake_st.session_state[state_key] == ["Fat Loss", "Run a half marathon"]
+
+    fake_st.session_state[main.UI_THEME_SESSION_KEY] = "light"
+    main._toggle_ui_theme()
+    assert fake_st.session_state[main.UI_THEME_SESSION_KEY] == "dark"
+    assert fake_st.session_state[state_key] == ["Fat Loss", "Run a half marathon"]
+
+
 def test_goal_editor_removes_one_goal_and_can_remove_final_goal(monkeypatch):
     fake_st = FakeStreamlit()
     fake_st.session_state["create_profile_form_goals_editor"] = [
@@ -1226,6 +1285,46 @@ def test_goal_editor_removes_one_goal_and_can_remove_final_goal(monkeypatch):
     main._remove_goal_from_editor("create_profile_form_goals_editor", 1, "goal_error")
     main._remove_goal_from_editor("create_profile_form_goals_editor", 0, "goal_error")
     assert fake_st.session_state["create_profile_form_goals_editor"] == []
+
+
+def test_long_special_and_twenty_goal_state_remains_ordered_list(monkeypatch):
+    fake_st = FakeStreamlit()
+    state_key = "create_profile_form_goals_editor"
+    error_key = "goal_error"
+    input_key = "goal_input"
+    open_key = "goal_add_open"
+    fake_st.session_state[state_key] = []
+    monkeypatch.setattr(main, "st", fake_st)
+
+    unusual_goals = [
+        "Complete a half marathon without stopping",
+        "Improve ankle & hip mobility",
+        "Strength — upper body",
+        "Exercise 4 times / week",
+    ]
+    for goal in unusual_goals:
+        fake_st.session_state[input_key] = goal
+        main._add_goal_to_editor(state_key, input_key, error_key, open_key)
+
+    for number in range(1, 21):
+        fake_st.session_state[input_key] = f"Goal {number:02d}"
+        main._add_goal_to_editor(state_key, input_key, error_key, open_key)
+
+    expected_goals = unusual_goals + [f"Goal {number:02d}" for number in range(1, 21)]
+    assert fake_st.session_state[state_key] == expected_goals
+    assert all(isinstance(goal, str) for goal in fake_st.session_state[state_key])
+
+    fake_st.session_state[input_key] = "Goal 07"
+    main._add_goal_to_editor(state_key, input_key, error_key, open_key)
+    assert fake_st.session_state[state_key] == expected_goals
+    assert fake_st.session_state[error_key] == "That goal is already in the list."
+
+    main._remove_goal_from_editor(state_key, 2, error_key)
+    assert fake_st.session_state[state_key] == [
+        *unusual_goals[:2],
+        unusual_goals[3],
+        *[f"Goal {number:02d}" for number in range(1, 21)],
+    ]
 
 
 def test_goal_editor_actions_do_not_call_profile_persistence(monkeypatch):
@@ -1257,6 +1356,30 @@ def test_goal_editor_plus_opens_add_input_without_persistence(monkeypatch):
 
     assert fake_st.session_state["create_profile_form_goal_add_open"] is True
     assert fake_st.session_state["create_profile_form_goal_error"] is None
+
+
+def test_profile_choice_and_goal_typing_do_not_persist_without_submit(monkeypatch):
+    fake_st = FakeStreamlit()
+    fake_st.session_state["create_profile_form_goal_add_open"] = True
+    fake_st.input_values = {
+        "Gender": "Female",
+        "Activity Level": "Very Active",
+    }
+    monkeypatch.setattr(main, "st", fake_st)
+
+    def fail_persistence(*args, **kwargs):
+        raise AssertionError("form field interaction must not persist without submit")
+
+    monkeypatch.setattr(main.profiles, "create_new_profile", fail_persistence)
+    monkeypatch.setattr(main.profiles, "save_profile_changes", fail_persistence)
+    monkeypatch.setattr(main.db, "create_profile", fail_persistence)
+    monkeypatch.setattr(main.db, "update_personal_information", fail_persistence)
+
+    main._render_profile_form(mode="create")
+
+    assert fake_st.radio_calls[0][0] == "Gender"
+    assert fake_st.selectbox_calls[0][0] == "Activity Level"
+    assert fake_st.text_input_calls[-1][0] == "New Goal"
 
 
 def test_profile_submit_receives_current_goal_editor_list(monkeypatch):
@@ -1316,6 +1439,191 @@ def test_profile_switching_refreshes_goal_editor_state_both_directions(monkeypat
     main._render_profile_form(mode="edit", profile=fake_st.session_state["selected_profile"])
     assert "edit_profile_form_goals_editor_profile-b" not in fake_st.session_state
     assert fake_st.session_state["edit_profile_form_goals_editor_profile-a"] == ["Fat Loss"]
+
+
+def test_profile_switching_refreshes_gender_activity_and_goal_state(monkeypatch):
+    fake_st = FakeStreamlit()
+    fake_st.session_state.update(
+        {
+            "profiles": [{"_id": "profile-a"}, {"_id": "profile-b"}],
+            "last_ai_answer": "existing answer",
+        }
+    )
+    monkeypatch.setattr(main, "st", fake_st)
+
+    profile_a = {
+        "_id": "profile-a",
+        "gender": "Male",
+        "activity_level": "Sedentary",
+        "goals": ["Fat Loss"],
+    }
+    profile_b = {
+        "_id": "profile-b",
+        "gender": "Female",
+        "activity_level": "Very Active",
+        "goals": ["Stay Active", "Run 5 km"],
+    }
+
+    for profile, gender_index, activity_index in (
+        (profile_a, 0, 0),
+        (profile_b, 1, 3),
+        (profile_a, 0, 0),
+        (profile_b, 1, 3),
+    ):
+        profile_id = profile["_id"]
+        fake_st.radio_calls = []
+        fake_st.selectbox_calls = []
+        fake_st.session_state[f"edit_profile_form_goal_input_{profile_id}"] = "stale input"
+        fake_st.session_state[f"edit_profile_form_goal_error_{profile_id}"] = "stale error"
+
+        main._set_selected_profile(profile)
+        main._render_profile_form(mode="edit", profile=profile)
+
+        assert fake_st.radio_calls[0][1]["index"] == gender_index
+        assert fake_st.selectbox_calls[0][1]["index"] == activity_index
+        assert fake_st.session_state[f"edit_profile_form_goals_editor_{profile_id}"] == profile[
+            "goals"
+        ]
+        assert f"edit_profile_form_goal_input_{profile_id}" not in fake_st.session_state
+        assert f"edit_profile_form_goal_error_{profile_id}" not in fake_st.session_state
+
+    assert fake_st.session_state["last_ai_answer"] == "existing answer"
+
+
+def test_unsaved_edit_goals_survive_repeated_theme_toggles_without_persistence(monkeypatch):
+    fake_st = FakeStreamlit()
+    state_key = "edit_profile_form_goals_editor_profile-a"
+    fake_st.session_state.update(
+        {
+            main.UI_THEME_SESSION_KEY: "light",
+            state_key: ["Fat Loss", "Stay Active"],
+            "goal_input": "Mobility work",
+        }
+    )
+    monkeypatch.setattr(main, "st", fake_st)
+
+    def fail_persistence(*args, **kwargs):
+        raise AssertionError("theme and temporary goal edits must not persist")
+
+    monkeypatch.setattr(main.profiles, "save_profile_changes", fail_persistence)
+    monkeypatch.setattr(main.db, "update_personal_information", fail_persistence)
+
+    main._add_goal_to_editor(state_key, "goal_input", "goal_error", "goal_add_open")
+    assert fake_st.session_state[state_key] == ["Fat Loss", "Stay Active", "Mobility work"]
+
+    main._toggle_ui_theme()
+    assert fake_st.session_state[main.UI_THEME_SESSION_KEY] == "dark"
+    assert fake_st.session_state[state_key] == ["Fat Loss", "Stay Active", "Mobility work"]
+
+    main._toggle_ui_theme()
+    assert fake_st.session_state[main.UI_THEME_SESSION_KEY] == "light"
+    assert fake_st.session_state[state_key] == ["Fat Loss", "Stay Active", "Mobility work"]
+
+    main._remove_goal_from_editor(state_key, 0, "goal_error")
+    main._toggle_ui_theme()
+
+    assert fake_st.session_state[main.UI_THEME_SESSION_KEY] == "dark"
+    assert fake_st.session_state[state_key] == ["Stay Active", "Mobility work"]
+
+
+def test_existing_legacy_profile_save_preserves_values_exactly(monkeypatch):
+    fake_st = FakeStreamlit()
+    fake_st.submit_value = True
+    seed_authenticated_session(fake_st, account_id="account-a")
+    fake_st.session_state["selected_profile_id"] = "profile-legacy"
+    fake_st.input_values = {
+        "Name": "Legacy Profile",
+        "Age": 40,
+        "Weight": 80.0,
+        "Height": 175.0,
+    }
+    monkeypatch.setattr(main, "st", fake_st)
+    calls = []
+
+    def fake_save_profile_changes(account_id, profile_id, **updates):
+        calls.append((account_id, profile_id, updates))
+        return {"_id": profile_id, **updates}
+
+    monkeypatch.setattr(main.profiles, "save_profile_changes", fake_save_profile_changes)
+    monkeypatch.setattr(main, "_refresh_profiles", lambda select_profile_id=None: True)
+
+    try:
+        main._render_profile_form(
+            mode="edit",
+            profile={
+                "_id": "profile-legacy",
+                "name": "Legacy Profile",
+                "age": 40,
+                "weight": 80.0,
+                "height": 175.0,
+                "gender": "unspecified",
+                "activity_level": "moderate",
+                "goals": ["Build strength", "Improve endurance"],
+            },
+        )
+    except RerunCalled:
+        pass
+    else:
+        raise AssertionError("profile edit should rerun")
+
+    assert calls == [
+        (
+            "account-a",
+            "profile-legacy",
+            {
+                "name": "Legacy Profile",
+                "age": 40,
+                "weight": 80.0,
+                "height": 175.0,
+                "gender": "unspecified",
+                "activity_level": "moderate",
+                "goals": ["Build strength", "Improve endurance"],
+            },
+        )
+    ]
+
+
+def test_existing_empty_goals_save_remains_empty(monkeypatch):
+    fake_st = FakeStreamlit()
+    fake_st.submit_value = True
+    seed_authenticated_session(fake_st, account_id="account-a")
+    fake_st.session_state["selected_profile_id"] = "profile-empty"
+    fake_st.input_values = {
+        "Name": "Empty Goals",
+        "Age": 35,
+        "Weight": 75.0,
+        "Height": 170.0,
+    }
+    monkeypatch.setattr(main, "st", fake_st)
+    calls = []
+
+    def fake_save_profile_changes(account_id, profile_id, **updates):
+        calls.append(updates)
+        return {"_id": profile_id, **updates}
+
+    monkeypatch.setattr(main.profiles, "save_profile_changes", fake_save_profile_changes)
+    monkeypatch.setattr(main, "_refresh_profiles", lambda select_profile_id=None: True)
+
+    try:
+        main._render_profile_form(
+            mode="edit",
+            profile={
+                "_id": "profile-empty",
+                "name": "Empty Goals",
+                "age": 35,
+                "weight": 75.0,
+                "height": 170.0,
+                "gender": "Male",
+                "activity_level": "Sedentary",
+                "goals": [],
+            },
+        )
+    except RerunCalled:
+        pass
+    else:
+        raise AssertionError("profile edit should rerun")
+
+    assert calls[0]["goals"] == []
 
 
 def test_successful_edit_save_synchronizes_goal_editor_state(monkeypatch):

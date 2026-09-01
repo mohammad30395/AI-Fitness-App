@@ -531,3 +531,139 @@ Goals
 
 ### Ready for UI Prompt-07
 - yes
+
+## UI Prompt-07 — Final Acceptance
+
+### Final implemented scope
+- Gender uses vertical `st.radio` with canonical `Male`, `Female`, and `Other` options while preserving legacy current values.
+- Activity Level uses full-row `st.selectbox` with canonical activity values while preserving legacy current values.
+- Goals use a dynamic native Streamlit `+` / `−` editor with `list[str]` state and persistence only on explicit profile Create/Save.
+- Runtime theme uses the session-state key `ui_theme`, allowed values `light` and `dark`, default `light`, and centralized CSS tokens.
+- Runtime theme preference is session-state based and is not intended to persist to Astra or browser localStorage.
+
+### Automated acceptance
+- Final focused UI/profile acceptance tests passed.
+- Full local/mock test suite passed.
+- Compile, diff whitespace, startup, static safety, and backend/dependency diff checks passed.
+
+### Test discovery
+- safe: all 15 files under `tests/` are local/mock tests and were run with `./.venv/bin/python -m pytest`.
+- skipped external: none from `tests/`.
+- skipped external: live/manual scripts such as live Astra/Langflow smoke checks were not run because they require external credentials/services or can touch cloud state.
+
+### New-profile acceptance
+- Create-mode Goals initialize once to `["Muscle Gain"]`.
+- Removing `Muscle Gain` leaves `[]` and a normal rerun does not reinsert it.
+- Custom goals `Fat Loss`, `Run a half marathon`, and `Improve flexibility` can be added.
+- Blank and duplicate additions are rejected.
+- Removing a custom goal leaves the expected ordered list.
+- Theme toggling preserves the temporary Goals state.
+- No profile persistence call occurs before explicit Create Profile submission.
+
+### Existing-profile acceptance
+- Legacy gender `unspecified` remains representable and unchanged save preserves it.
+- Legacy activity `moderate` remains representable and unchanged save preserves it.
+- Legacy goals `Build strength` and `Improve endurance` initialize and save exactly as stored.
+- Existing empty goals remain `[]`; `Muscle Gain` is not injected.
+
+### Legacy compatibility
+- No automatic semantic mapping is performed.
+- `moderate` is not converted to `Moderately Active`.
+- `active` is not converted to `Very Active`.
+- `unspecified` is not converted to `Other`.
+- Custom/legacy goals remain ordinary strings.
+
+### Goals state acceptance
+- Goals remain `list[str]`.
+- Long, special-character, and 20-goal state tests pass.
+- Ordering is deterministic.
+- Exact duplicates remain prevented.
+- Individual removal targets only the requested index.
+
+### Theme acceptance
+- Absent theme initializes to `light`.
+- Invalid theme state normalizes to `light`.
+- Toggle changes `light` to `dark` and `dark` to `light`.
+- Valid theme survives initialization reruns.
+- Theme toggles preserve selected profile state, Goals editor state, nutrition, notes, and Ask AI state.
+- Light and Dark themes define the same `UI_THEME_TOKEN_NAMES` contract and have distinct background/surface/text/input tokens.
+
+### Persistence-boundary verification
+- Gender selection does not persist without form submission.
+- Activity selection does not persist without form submission.
+- Pressing `+`, typing New Goal, pressing Add Goal, pressing `−`, and toggling theme do not persist.
+- Create Profile and Save changes remain the only profile-form persistence boundary.
+- `main.py` continues to call `profiles.py` for profile persistence and does not bypass it with direct Astra profile writes.
+
+### Unrelated-feature regression result
+- Nutrition / Macros tests passed.
+- Notes tests passed.
+- Ask AI tests passed.
+- Profile service tests passed.
+- AI/Langflow client tests passed with mocked requests.
+
+### Static safety review
+- No runtime generated/hash CSS selectors were found.
+- No JavaScript or custom component HTML path was introduced.
+- No private Streamlit theme API was found.
+- No runtime `config.toml` mutation was found.
+- Environment variable names appear only in expected config/test/flow contexts; no real secret values were exposed.
+- Merge-conflict markers, breakpoints, and relevant debug leftovers were not found in runtime UI code.
+
+### Startup verification
+- `./.venv/bin/streamlit run main.py --server.headless true --server.port 8507 --browser.gatherUsageStats false` started successfully and was stopped.
+- Startup alone did not require profile mutation.
+
+### Manual Browser Sign-Off Checklist
+
+LIGHT MODE
+
+[ ] theme button is top-right
+[ ] page is visibly light
+[ ] Gender is vertical
+[ ] Activity Level is below Gender
+[ ] Goals editor is below Activity
+[ ] + is clearly visible
+[ ] each goal has a visible −
+[ ] Add Goal input is readable
+[ ] long goal text does not overlap −
+[ ] empty Goals state looks intentional
+
+DARK MODE
+
+[ ] page is visibly dark
+[ ] text remains readable
+[ ] inputs remain readable
+[ ] selectbox remains readable
+[ ] Goals editor border/surface is visible
+[ ] + is visible
+[ ] − is visible
+[ ] focus states are visible
+
+INTERACTION
+
+[ ] new profile starts with Muscle Gain
+[ ] Muscle Gain can be removed
+[ ] removed Muscle Gain stays removed
+[ ] custom goal can be added
+[ ] multiple custom goals can be added
+[ ] custom goal can be removed
+[ ] blank goal is rejected
+[ ] duplicate goal is rejected
+[ ] theme can be toggled without losing temporary goals
+[ ] profile A/B switching shows correct goals
+[ ] Save persists current goals
+[ ] browser refresh/reselect shows saved goals
+
+GENERAL
+
+[ ] Nutrition still works
+[ ] Notes still work
+[ ] Ask AI still works
+[ ] no obvious layout overflow
+[ ] no unreadable text
+[ ] no duplicated labels
+
+### Remaining limitations
+- Automated acceptance passed, but final visual sign-off requires the manual browser checklist.
+- Runtime theme preference is session-state based only and does not persist to Astra or browser localStorage.
