@@ -55,6 +55,8 @@ class FakeStreamlit:
         self.radio_calls = []
         self.selectbox_calls = []
         self.multiselect_calls = []
+        self.columns_calls = []
+        self.subheader_calls = []
         self.submit_value = False
         self.button_values = {}
         self.tab_labels = []
@@ -74,6 +76,7 @@ class FakeStreamlit:
         self.headers.append(message)
 
     def subheader(self, *args, **kwargs):
+        self.subheader_calls.append((args, kwargs))
         return None
 
     def tabs(self, labels):
@@ -81,6 +84,7 @@ class FakeStreamlit:
         return [FakeTab() for _ in labels]
 
     def columns(self, spec, **kwargs):
+        self.columns_calls.append((spec, kwargs))
         count = spec if isinstance(spec, int) else len(spec)
         return [FakeColumn() for _ in range(count)]
 
@@ -647,7 +651,7 @@ def test_profile_creation_passes_trusted_account_id_without_owner_field(monkeypa
         "Height": 180.0,
         "Gender": "Male",
         "Activity Level": "Moderately Active",
-        "Goals": ["Muscle Gain"],
+        "Select Your Goals": ["Muscle Gain"],
         "owner_account_id": "account-b",
     }
     monkeypatch.setattr(main, "st", fake_st)
@@ -768,7 +772,7 @@ def test_profile_create_uses_native_choice_widgets_with_canonical_options(monkey
     ]
     assert fake_st.multiselect_calls == [
         (
-            "Goals",
+            "Select Your Goals",
             {
                 "options": main.GOAL_OPTIONS,
                 "default": [],
@@ -776,6 +780,8 @@ def test_profile_create_uses_native_choice_widgets_with_canonical_options(monkey
             },
         )
     ]
+    assert fake_st.columns_calls == [(3, {})]
+    assert fake_st.subheader_calls == [(("Goals",), {})]
 
 
 def test_profile_edit_initializes_canonical_values(monkeypatch):
@@ -896,7 +902,7 @@ def test_profile_multiselect_submission_remains_list_without_text_parsing(monkey
         "Height": 180.0,
         "Gender": "Male",
         "Activity Level": "Sedentary",
-        "Goals": ["Build strength\nImprove endurance"],
+        "Select Your Goals": ["Build strength\nImprove endurance"],
     }
     monkeypatch.setattr(main, "st", fake_st)
     calls = []
@@ -930,7 +936,7 @@ def test_profile_edit_saves_intentional_canonical_replacements(monkeypatch):
         "Height": 181.0,
         "Gender": "Other",
         "Activity Level": "Very Active",
-        "Goals": ["Muscle Gain"],
+        "Select Your Goals": ["Muscle Gain"],
     }
     monkeypatch.setattr(main, "st", fake_st)
     calls = []

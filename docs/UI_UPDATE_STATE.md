@@ -236,3 +236,54 @@ Goals:
 
 ### Ready for UI Prompt-03
 - Yes.
+
+## UI Prompt-03 — Layout & Visual Polish
+
+### Final target layout
+
+Gender
+-> vertical radio
+
+Activity Level
+-> full-row selectbox
+
+Goals
+-> section heading + `Select Your Goals` multiselect
+
+### Layout change
+- The old Gender/Activity Level `st.columns(2)` arrangement was removed from the profile form.
+- Gender, Activity Level, and Goals now render sequentially in the form.
+- Unrelated columns remain unchanged, including the age/weight/height profile row and unrelated note confirmation layout.
+
+### Styling strategy
+- Native Streamlit widgets are used for all three target controls.
+- Custom CSS added: no.
+- JavaScript added: no.
+- Global theme changed: no.
+- Orange screenshot annotation borders and artificial focus borders were not recreated.
+
+### Responsive behavior
+- Activity Level relies on the native full-row `st.selectbox` width in the form container.
+- Goals relies on the native full-row `st.multiselect` width in the form container.
+- No fixed pixel widths were added.
+
+### Functional behavior preserved
+- Canonical options unchanged.
+- Legacy values remain representable through the existing Prompt-01 helpers.
+- Goals remain `list[str]`.
+- Profile switching targeted widget-state clearing is unchanged.
+- Persistence continues through the existing explicit form submit path.
+- Backend files and cloud integrations are unchanged.
+
+### Visual verification
+- Method: source/layout inspection plus mocked Streamlit UI tests.
+- Result: verified Gender is a vertical `st.radio`, Activity Level is below Gender as a full-row `st.selectbox`, and Goals is below Activity Level with one `Goals` heading and a `Select Your Goals` multiselect label.
+- Manual browser visual verification: not run because rendering the authenticated profile form with real Streamlit would require logging in and loading profile data through the live Astra-backed path. No safe local/mock visual mode exists in the repository.
+
+### Tests
+- Focused UI tests: `./.venv/bin/python -m pytest tests/test_profile_ui_options.py tests/test_main_resilience.py` passed with 56 tests.
+- Safe regression suite: `./.venv/bin/python -m pytest tests/test_profile_ui_options.py tests/test_profiles.py tests/test_db.py tests/test_utils_serialization.py tests/test_ai.py tests/test_main_resilience.py` passed with 174 tests.
+- Compile verification: `./.venv/bin/python -m compileall main.py profiles.py db.py ai.py utils.py` passed.
+
+### Ready for UI Prompt-04
+- Yes.

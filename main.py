@@ -447,24 +447,22 @@ def _render_profile_form(*, mode: str, profile: dict | None = None) -> None:
                 value=defaults["height"],
                 key=f"{form_key}_height",
             )
-        gender_col, activity_col = st.columns(2)
-        with gender_col:
-            gender = st.radio(
-                "Gender",
-                options=gender_options,
-                index=_selected_option_index(gender_options, defaults["gender"]),
-                key=_profile_choice_widget_key(form_key, "gender_choice"),
-            )
-        with activity_col:
-            activity_level = st.selectbox(
-                "Activity Level",
-                options=activity_level_options,
-                index=_selected_option_index(activity_level_options, defaults["activity_level"]),
-                key=_profile_choice_widget_key(form_key, "activity_level_choice"),
-                placeholder="Choose activity level",
-            )
+        gender = st.radio(
+            "Gender",
+            options=gender_options,
+            index=_selected_option_index(gender_options, defaults["gender"]),
+            key=_profile_choice_widget_key(form_key, "gender_choice"),
+        )
+        activity_level = st.selectbox(
+            "Activity Level",
+            options=activity_level_options,
+            index=_selected_option_index(activity_level_options, defaults["activity_level"]),
+            key=_profile_choice_widget_key(form_key, "activity_level_choice"),
+            placeholder="Choose activity level",
+        )
+        st.subheader("Goals")
         goals = st.multiselect(
-            "Goals",
+            "Select Your Goals",
             options=goal_options,
             default=selected_goals,
             key=_profile_choice_widget_key(form_key, "goals_multiselect"),
