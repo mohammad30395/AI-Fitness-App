@@ -44,6 +44,29 @@ SESSION_DEFAULTS = {
 UI_THEME_SESSION_KEY = "ui_theme"
 UI_THEME_OPTIONS = ("light", "dark")
 DEFAULT_UI_THEME = "light"
+UI_THEME_TOKEN_NAMES = (
+    "background",
+    "surface",
+    "surface_alt",
+    "text",
+    "text_muted",
+    "border",
+    "border_strong",
+    "input_background",
+    "input_hover",
+    "accent",
+    "accent_hover",
+    "button_background",
+    "button_hover",
+    "button_text",
+    "danger",
+    "danger_hover",
+    "focus_ring",
+    "shadow",
+    "success",
+    "warning",
+    "error",
+)
 UI_THEME_TOKENS = {
     "light": {
         "background": "#f7f8fb",
@@ -52,10 +75,18 @@ UI_THEME_TOKENS = {
         "text": "#172033",
         "text_muted": "#586174",
         "border": "#d8dee9",
+        "border_strong": "#b8c2d3",
         "input_background": "#ffffff",
+        "input_hover": "#f8fafc",
         "accent": "#2563eb",
+        "accent_hover": "#1d4ed8",
         "button_background": "#2563eb",
+        "button_hover": "#1d4ed8",
         "button_text": "#ffffff",
+        "danger": "#b42318",
+        "danger_hover": "#fee4e2",
+        "focus_ring": "rgba(37, 99, 235, 0.28)",
+        "shadow": "0 10px 28px rgba(23, 32, 51, 0.08)",
         "success": "#047857",
         "warning": "#b45309",
         "error": "#b91c1c",
@@ -67,10 +98,18 @@ UI_THEME_TOKENS = {
         "text": "#f3f4f6",
         "text_muted": "#c5cbd6",
         "border": "#3f4b5f",
+        "border_strong": "#64748b",
         "input_background": "#172033",
+        "input_hover": "#1f2a3d",
         "accent": "#60a5fa",
+        "accent_hover": "#93c5fd",
         "button_background": "#60a5fa",
+        "button_hover": "#93c5fd",
         "button_text": "#0b1220",
+        "danger": "#fb7185",
+        "danger_hover": "#3b1823",
+        "focus_ring": "rgba(96, 165, 250, 0.35)",
+        "shadow": "0 10px 28px rgba(0, 0, 0, 0.24)",
         "success": "#34d399",
         "warning": "#fbbf24",
         "error": "#f87171",
@@ -154,7 +193,7 @@ def _theme_declarations(theme: str) -> str:
     tokens = UI_THEME_TOKENS[theme if theme in UI_THEME_OPTIONS else DEFAULT_UI_THEME]
     return "\n".join(
         f"    --fit-{name.replace('_', '-')}: {value};"
-        for name, value in tokens.items()
+        for name, value in ((name, tokens[name]) for name in UI_THEME_TOKEN_NAMES)
     )
 
 
@@ -173,7 +212,11 @@ def _apply_ui_theme() -> None:
 }}
 
 [data-testid="stHeader"] {{
-    background: color-mix(in srgb, var(--fit-background) 88%, transparent);
+    background: var(--fit-background);
+}}
+
+[data-testid="stMainBlockContainer"] {{
+    padding-top: 1.5rem;
 }}
 
 [data-testid="stMarkdownContainer"],
@@ -193,7 +236,9 @@ span {{
 [data-testid="stForm"],
 [data-testid="stVerticalBlockBorderWrapper"] {{
     background-color: var(--fit-surface);
-    border-color: var(--fit-border);
+    border: 1px solid var(--fit-border);
+    border-radius: 0.65rem;
+    box-shadow: var(--fit-shadow);
 }}
 
 [data-testid="stTextInput"] input,
@@ -203,6 +248,29 @@ div[data-baseweb="select"] > div {{
     background-color: var(--fit-input-background);
     color: var(--fit-text);
     border-color: var(--fit-border);
+    border-radius: 0.45rem;
+    box-shadow: none;
+}}
+
+[data-testid="stTextInput"] input:hover,
+[data-testid="stNumberInput"] input:hover,
+[data-testid="stTextArea"] textarea:hover,
+div[data-baseweb="select"] > div:hover {{
+    background-color: var(--fit-input-hover);
+    border-color: var(--fit-border-strong);
+}}
+
+[data-testid="stTextInput"] input:focus,
+[data-testid="stNumberInput"] input:focus,
+[data-testid="stTextArea"] textarea:focus,
+div[data-baseweb="select"]:focus-within > div {{
+    border-color: var(--fit-accent);
+    box-shadow: 0 0 0 3px var(--fit-focus-ring);
+}}
+
+[data-testid="stTextInput"] input::placeholder,
+[data-testid="stTextArea"] textarea::placeholder {{
+    color: var(--fit-text-muted);
 }}
 
 [data-testid="stRadio"] label,
@@ -213,9 +281,51 @@ div[data-baseweb="select"] > div {{
     color: var(--fit-text);
 }}
 
+[data-testid="stRadio"] {{
+    margin-bottom: 0.75rem;
+}}
+
+[data-testid="stRadio"] div[role="radiogroup"] {{
+    gap: 0.15rem;
+}}
+
+[data-testid="stRadio"] div[role="radiogroup"] label {{
+    border-radius: 0.45rem;
+    padding: 0.1rem 0.2rem;
+}}
+
+[data-testid="stRadio"] div[role="radiogroup"] label:hover {{
+    background-color: var(--fit-surface-alt);
+}}
+
+[data-testid="stSelectbox"] svg {{
+    color: var(--fit-text-muted);
+    fill: var(--fit-text-muted);
+}}
+
 [data-testid="stButton"] button,
 [data-testid="stFormSubmitButton"] button {{
-    border-color: var(--fit-border);
+    border: 1px solid var(--fit-border);
+    border-radius: 0.45rem;
+    background-color: var(--fit-surface-alt);
+    color: var(--fit-text);
+    box-shadow: none;
+    font-weight: 600;
+    min-height: 2.25rem;
+    transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
+}}
+
+[data-testid="stButton"] button:hover,
+[data-testid="stFormSubmitButton"] button:hover {{
+    background-color: var(--fit-input-hover);
+    border-color: var(--fit-border-strong);
+    color: var(--fit-text);
+}}
+
+[data-testid="stButton"] button:focus-visible,
+[data-testid="stFormSubmitButton"] button:focus-visible {{
+    outline: 3px solid var(--fit-focus-ring);
+    outline-offset: 2px;
 }}
 
 [data-testid="stButton"] button[kind="primary"],
@@ -223,6 +333,13 @@ div[data-baseweb="select"] > div {{
     background-color: var(--fit-button-background);
     color: var(--fit-button-text);
     border-color: var(--fit-button-background);
+}}
+
+[data-testid="stButton"] button[kind="primary"]:hover,
+[data-testid="stFormSubmitButton"] button[kind="primary"]:hover {{
+    background-color: var(--fit-button-hover);
+    border-color: var(--fit-button-hover);
+    color: var(--fit-button-text);
 }}
 </style>
 """,
@@ -518,38 +635,41 @@ def _render_goals_editor(form_key: str, state_key: str, profile: dict | None = N
     with st.container(border=True):
         if goals:
             for index, goal in enumerate(goals):
-                goal_col, remove_col = st.columns((5, 1), vertical_alignment="center")
+                goal_col, remove_col = st.columns((4, 1), vertical_alignment="center")
                 with goal_col:
                     st.write(goal)
                 with remove_col:
                     st.form_submit_button(
                         "−",
                         key=f"{state_key}_remove_{index}",
+                        help=f"Remove {goal}",
                         on_click=_remove_goal_from_editor,
                         args=(state_key, index, error_key),
                         use_container_width=True,
                     )
         else:
-            st.write("No goals selected.")
+            st.write("No goals added yet.")
 
         if st.session_state.get(open_key):
-            input_col, add_col = st.columns((5, 1), vertical_alignment="bottom")
+            input_col, add_col = st.columns((4, 1), vertical_alignment="bottom")
             with input_col:
                 st.text_input("New Goal", key=input_key)
             with add_col:
                 st.form_submit_button(
                     "Add Goal",
                     key=f"{state_key}_add_goal",
+                    help="Confirm new goal",
                     on_click=_add_goal_to_editor,
                     args=(state_key, input_key, error_key, open_key),
                     use_container_width=True,
                 )
         else:
-            _, add_col = st.columns((5, 1))
+            _, add_col = st.columns((4, 1))
             with add_col:
                 st.form_submit_button(
                     "+",
                     key=f"{state_key}_show_add_goal",
+                    help="Add goal",
                     on_click=_show_goal_input,
                     args=(open_key, error_key),
                     use_container_width=True,

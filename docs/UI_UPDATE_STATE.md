@@ -449,3 +449,85 @@ Goals
 - `ai.py`: unchanged.
 - Langflow: unchanged.
 - Astra DB/schema: unchanged.
+
+## UI Prompt-06 — Theme and Goals Visual Integration
+
+### Visual design strategy
+- Continued the existing Prompt-05 centralized runtime theme system.
+- Used a restrained SaaS visual style with soft light backgrounds, deep neutral dark backgrounds, subtle borders, modest radius, and light shadowing.
+- Kept native Streamlit widgets and improved their visual consistency through shared theme tokens.
+
+### Theme tokens changed/added
+- Added a shared `UI_THEME_TOKEN_NAMES` contract.
+- Added `border_strong`, `input_hover`, `accent_hover`, `button_hover`, `danger`, `danger_hover`, `focus_ring`, and `shadow`.
+- Light and Dark themes define the same token names.
+- Existing core tokens for background, surface, text, muted text, input background, accent, primary button, and status colors remain.
+
+### Goals editor styling
+- The bordered editor uses the existing `st.container(border=True)` surface, styled centrally through the theme CSS.
+- Goal rows now use conservative `(4, 1)` columns so the text column remains dominant while the remove control stays compact.
+- Long goal text remains in a native text column and can wrap without overlapping the remove control.
+- Empty state copy is now `No goals added yet.` and does not reinsert defaults.
+
+### Add/remove control styling
+- Auxiliary buttons use the shared secondary button styling: subtle surface background, theme-aware border, hover state, and focus ring.
+- The `+` control remains compact in the right-side control column and has native help text.
+- The `−` controls remain compact in each row and have native help text identifying the goal being removed.
+- Individual danger styling for only `−` controls was not added because Streamlit does not expose a stable per-button selector for that intent without brittle label/DOM targeting.
+
+### Input styling
+- Text inputs, number inputs, text areas, and selectbox inputs share theme-aware backgrounds, borders, hover states, focus rings, and placeholder color.
+- Selectbox arrow SVG color follows the muted text token.
+- New Goal input uses the same central styling as other text inputs.
+
+### Button hierarchy
+- Primary Create/Save buttons remain visually dominant through `kind="primary"` styling.
+- Theme toggle, `+`, `−`, and Add Goal use restrained secondary styling.
+- Auxiliary controls are intentionally less prominent than profile persistence actions.
+
+### Responsive behavior
+- No fixed pixel widths were added.
+- Goal row columns use conservative ratios instead of extreme desktop-only spacing.
+- The form remains native Streamlit-responsive and does not introduce horizontal scrolling.
+
+### Light mode result
+- Page background is soft light.
+- Major surfaces are white with subtle borders and a modest shadow.
+- Inputs stay neutral and readable.
+- Text and muted text use dark readable tokens.
+- Goals editor, `+`, `−`, Add Goal, and theme toggle all share the light theme styling.
+
+### Dark mode result
+- Page background is deep neutral/navy.
+- Surfaces are slightly lighter than the page background.
+- Inputs remain distinct from surfaces and page background.
+- Text and muted text use readable light tokens.
+- Goals editor, `+`, `−`, Add Goal, and theme toggle all share the dark theme styling.
+
+### CSS safety
+- Styling remains in one centralized `_apply_ui_theme()` block.
+- Stable `data-testid`, `data-baseweb`, element, pseudo-class, and ARIA-role selectors are used.
+- Generated/hash selectors are not used.
+- No JavaScript, HTML event handlers, custom component package, config mutation, or dependency additions were introduced.
+
+### Functional behavior preserved
+- `ui_theme` semantics, default, and toggle direction are unchanged.
+- Gender remains vertical `st.radio`.
+- Activity Level remains full-row `st.selectbox`.
+- Goals remain dynamic native `+` / `−` with arbitrary custom goal support.
+- Duplicate and blank goal validation are unchanged.
+- Create-mode default `Muscle Gain` still initializes only once and is not reinserted after removal.
+- Goals remain `list[str]`.
+- `+` and `−` remain non-persistent session-state actions.
+- Profile Create/Save remains the persistence boundary.
+- Profile switching logic is unchanged.
+
+### Tests
+- Focused UI/theme tests: `./.venv/bin/python -m pytest tests/test_profile_ui_options.py tests/test_main_resilience.py` passed with 78 tests.
+- Coverage includes shared token names, distinct light/dark tokens, theme toggle behavior, no generated/hash selectors, no JavaScript, no runtime config mutation, Gender/Activity/Goals regression behavior, empty Goals state, default removal persistence, non-persistent add/remove actions, Save/Create persistence boundary, and Goals state preservation across theme toggles.
+
+### Manual verification
+- Manual browser visual verification: not run because rendering and interacting with the authenticated profile UI requires live Astra-backed login/profile loading, and the repository has no safe local/mock visual mode.
+
+### Ready for UI Prompt-07
+- yes

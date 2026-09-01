@@ -269,6 +269,42 @@ def test_ui_theme_allowed_values_are_exact_contract():
     assert set(main.UI_THEME_TOKENS) == {"light", "dark"}
 
 
+def test_ui_theme_token_sets_share_required_visual_contract():
+    required_tokens = set(main.UI_THEME_TOKEN_NAMES)
+
+    assert required_tokens == {
+        "background",
+        "surface",
+        "surface_alt",
+        "text",
+        "text_muted",
+        "border",
+        "border_strong",
+        "input_background",
+        "input_hover",
+        "accent",
+        "accent_hover",
+        "button_background",
+        "button_hover",
+        "button_text",
+        "danger",
+        "danger_hover",
+        "focus_ring",
+        "shadow",
+        "success",
+        "warning",
+        "error",
+    }
+    assert set(main.UI_THEME_TOKENS["light"]) == required_tokens
+    assert set(main.UI_THEME_TOKENS["dark"]) == required_tokens
+
+
+def test_light_and_dark_theme_tokens_are_visually_distinct():
+    assert main.UI_THEME_TOKENS["light"]["background"] != main.UI_THEME_TOKENS["dark"]["background"]
+    assert main.UI_THEME_TOKENS["light"]["surface"] != main.UI_THEME_TOKENS["dark"]["surface"]
+    assert main.UI_THEME_TOKENS["light"]["text"] != main.UI_THEME_TOKENS["dark"]["text"]
+
+
 def test_ui_theme_defaults_to_light_without_public_runtime_theme_api(monkeypatch):
     fake_st = FakeStreamlit()
     monkeypatch.setattr(main, "st", fake_st)
@@ -455,9 +491,15 @@ def test_ui_theme_css_uses_tokens_without_js_or_private_api(monkeypatch):
     css = fake_st.markdown_calls[0][0][0]
     assert fake_st.markdown_calls[0][1] == {"unsafe_allow_html": True}
     assert "--fit-background: #111827;" in css
+    assert "--fit-focus-ring:" in css
+    assert "--fit-shadow:" in css
     assert "[data-testid=\"stAppViewContainer\"]" in css
+    assert "[data-testid=\"stRadio\"]" in css
+    assert "[data-testid=\"stSelectbox\"]" in css
     assert "<script" not in css.lower()
     assert "st._config" not in css
+    assert "st-emotion-cache" not in css
+    assert ".css-" not in css
 
 
 def test_main_source_avoids_private_theme_api_and_javascript():
@@ -465,9 +507,13 @@ def test_main_source_avoids_private_theme_api_and_javascript():
 
     assert "st._config" not in source
     assert "streamlit.config" not in source
+    assert "config.toml" not in source
     assert "<script" not in source.lower()
+    assert "javascript:" not in source.lower()
     assert "components.html" not in source
     assert ".html(" not in source
+    assert "st-emotion-cache" not in source
+    assert ".css-" not in source
 
 
 def test_trusted_account_id_comes_from_authenticated_session(monkeypatch):
@@ -1033,8 +1079,8 @@ def test_profile_create_uses_native_choice_widgets_and_goal_editor(monkeypatch):
     assert fake_st.session_state["create_profile_form_goals_editor"] == ["Muscle Gain"]
     assert fake_st.columns_calls == [
         (3, {}),
-        ((5, 1), {"vertical_alignment": "center"}),
-        ((5, 1), {}),
+        ((4, 1), {"vertical_alignment": "center"}),
+        ((4, 1), {}),
     ]
     assert fake_st.subheader_calls == [(("Goals",), {})]
     assert any(label == "−" for label, _kwargs in fake_st.form_submit_calls)
