@@ -850,3 +850,72 @@ GENERAL
 
 ### Ready for FIX Prompt-10
 - yes, after final Prompt-09 verification remains green.
+
+## FIX Prompt-10 — Unified Top-Right Header
+
+### Previous header structure
+- Theme control rendered separately before authentication/session initialization.
+- Signed-in account status and Logout rendered later through the authenticated header.
+- Create Profile was available through the Profile section's Create profile tab.
+- The application had separate header-like action areas instead of one coherent action row.
+
+### New header structure
+- Authenticated application action row now renders in one native Streamlit column layout.
+- Action order is Theme -> Create Profile -> Logout.
+- Logout is the furthest-right application action.
+- The row renders after page setup/theme injection/authentication/session initialization and before the main Profile/Nutrition/Notes/Ask AI controls.
+
+### Account status placement
+- Signed-in username remains visible in the left side of the unified application header row.
+- Internal account IDs are not displayed.
+
+### Streamlit toolbar separation strategy
+- The application action row stays in normal Streamlit content flow.
+- No Streamlit Deploy/menu toolbar hiding or DOM manipulation was added.
+- No JavaScript, fixed positioning, absolute positioning, or generated class hash selectors were added.
+
+### Theme behavior
+- The existing `ui_theme` session key, allowed values, default, and toggle logic are preserved.
+- Light mode still presents `🌙 Dark`.
+- Dark mode still presents `☀️ Light`.
+- Theme toggling does not submit forms or persist profile data.
+
+### Create Profile navigation/state
+- A small `profile_ui_mode` session key controls whether the Profile section shows selected/edit mode or create mode.
+- Clicking the top-row Create Profile button enters create mode without touching Astra or profile persistence.
+- Create mode uses the existing `_render_profile_form(mode="create")` implementation and the existing `profiles.create_new_profile(...)` service path on submit.
+- New-profile goal initialization remains `["Muscle Gain"]` once per create editor state.
+
+### Cancel/back behavior
+- Create mode includes `Back to selected profile`.
+- Back exits create mode, clears unsaved create-form state, and preserves the selected stored profile, authentication, and theme.
+- Back does not save, logout, or alter backend state.
+
+### Successful create behavior
+- Successful create still calls `profiles.create_new_profile(...)`.
+- After create, profiles are refreshed with the new profile selected, create form state is cleared, and `profile_ui_mode` returns to selected mode.
+
+### Logout behavior
+- Logout is rendered in the same application action group and remains last.
+- Existing logout semantics are preserved through `_reset_session_for_logout()`.
+- Temporary authenticated/session data is cleared according to the existing security contract.
+
+### Responsive strategy
+- The header uses native `st.columns((4, 2, 1, 1.6, 1), vertical_alignment="center")`.
+- It avoids fixed desktop coordinates and horizontal overlay positioning.
+- Controls remain normal Streamlit buttons with native keyboard behavior.
+
+### Theme visibility
+- Header buttons reuse the centralized runtime theme button styling.
+- Light and dark token contracts remain unchanged.
+- No separate CSS system was added for the header.
+
+### Tests
+- Added/updated tests for header action order, logout-last placement, header-before-profile rendering, theme toggle behavior, Create Profile mode entry, no persistence on create entry, create default goals, theme/create-mode preservation, cancel/back behavior, successful create service path, removal of old Create profile tab navigation, static toolbar/JavaScript safety, and Prompt-09 AI message preservation.
+
+### Manual verification
+- Automated startup check is required for Prompt-10.
+- Authenticated visual header verification may require user browser sign-off if credentials/session automation is not available.
+
+### Ready for FIX Prompt-11
+- yes, if final Prompt-10 verification remains green.

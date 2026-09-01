@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 
 import main
@@ -489,8 +491,269 @@ def test_ui_theme_control_renders_before_main_profile_controls(monkeypatch):
     main.main()
 
     theme_button_index = fake_st.events.index(("button", "🌙 Dark"))
-    gender_radio_index = fake_st.events.index(("radio", "Gender"))
-    assert theme_button_index < gender_radio_index
+    profile_header_index = fake_st.events.index(("header", "Profile"))
+    assert theme_button_index < profile_header_index
+
+
+def test_unified_header_action_order_and_logout_is_last(monkeypatch):
+    fake_st = FakeStreamlit()
+    fake_st.private_ui_allowed = True
+    seed_authenticated_session(fake_st, username="mohammad2005")
+    fake_st.session_state[main.UI_THEME_SESSION_KEY] = "light"
+    monkeypatch.setattr(main, "st", fake_st)
+
+    main._render_authenticated_header()
+
+    button_labels = [label for label, _kwargs in fake_st.button_calls]
+    assert button_labels == ["🌙 Dark", "Create Profile", "Logout"]
+    assert button_labels[-1] == "Logout"
+    assert fake_st.caption_messages == ["Signed in as mohammad2005"]
+    assert fake_st.columns_calls == [((4, 2, 1, 1.6, 1), {"vertical_alignment": "center"})]
+
+
+def test_unified_header_theme_button_toggles_theme(monkeypatch):
+    fake_st = FakeStreamlit()
+    fake_st.private_ui_allowed = True
+    seed_authenticated_session(fake_st)
+    fake_st.session_state[main.UI_THEME_SESSION_KEY] = "light"
+    fake_st.button_values["ui_theme_toggle"] = True
+    monkeypatch.setattr(main, "st", fake_st)
+
+    main._render_authenticated_header()
+
+    assert fake_st.session_state[main.UI_THEME_SESSION_KEY] == "dark"
+    assert fake_st.session_state.get(main.PROFILE_UI_MODE_SESSION_KEY) is None
+
+
+def test_unified_header_create_profile_button_enters_create_mode_without_persistence(monkeypatch):
+    fake_st = FakeStreamlit()
+    fake_st.private_ui_allowed = True
+    seed_authenticated_session(fake_st)
+    fake_st.session_state.update(
+        {
+            main.UI_THEME_SESSION_KEY: "dark",
+            "selected_profile_id": "profile-a",
+            "selected_profile": {"_id": "profile-a", "name": "A"},
+            "nutrition": {"calories": 2000},
+            "notes": [{"_id": "note-a"}],
+            "last_ai_answer": "existing answer",
+        }
+    )
+    fake_st.button_values["profile_create_action"] = True
+    monkeypatch.setattr(main, "st", fake_st)
+
+    def fail_persistence(*args, **kwargs):
+        raise AssertionError("Create Profile header action must not persist")
+
+    monkeypatch.setattr(main.profiles, "create_new_profile", fail_persistence)
+    monkeypatch.setattr(main.profiles, "save_profile_changes", fail_persistence)
+    monkeypatch.setattr(main.db, "create_profile", fail_persistence)
+
+    main._render_authenticated_header()
+
+    assert fake_st.session_state[main.PROFILE_UI_MODE_SESSION_KEY] == main.PROFILE_UI_MODE_CREATE
+    assert fake_st.session_state[main.UI_THEME_SESSION_KEY] == "dark"
+    assert fake_st.session_state["selected_profile_id"] == "profile-a"
+    assert fake_st.session_state["selected_profile"] == {"_id": "profile-a", "name": "A"}
+    assert fake_st.session_state["nutrition"] == {"calories": 2000}
+    assert fake_st.session_state["notes"] == [{"_id": "note-a"}]
+    assert fake_st.session_state["last_ai_answer"] == "existing answer"
+
+
+def test_unified_header_renders_actions_before_profile_section(monkeypatch):
+    fake_st = FakeStreamlit()
+    fake_st.private_ui_allowed = True
+    seed_authenticated_session(fake_st)
+    monkeypatch.setattr(main, "st", fake_st)
+    monkeypatch.setattr(
+        main,
+        "_refresh_profiles",
+        lambda select_profile_id=None: fake_st.session_state.update(
+            {
+                "profiles": [],
+                "selected_profile_id": None,
+                "selected_profile": None,
+            }
+        )
+        or True,
+    )
+
+    main.main()
+
+    action_indexes = [
+        fake_st.events.index(("button", "🌙 Dark")),
+        fake_st.events.index(("button", "Create Profile")),
+        fake_st.events.index(("button", "Logout")),
+    ]
+    profile_header_index = fake_st.events.index(("header", "Profile"))
+    assert action_indexes == sorted(action_indexes)
+    assert max(action_indexes) < profile_header_index
+
+
+def test_create_mode_initializes_goals_once_and_theme_toggle_preserves_them(monkeypatch):
+    fake_st = FakeStreamlit()
+    fake_st.private_ui_allowed = True
+    seed_authenticated_session(fake_st)
+    fake_st.session_state.update(
+        {
+            main.PROFILE_UI_MODE_SESSION_KEY: main.PROFILE_UI_MODE_CREATE,
+            main.UI_THEME_SESSION_KEY: "light",
+            "profiles": [],
+        }
+    )
+    monkeypatch.setattr(main, "st", fake_st)
+    monkeypatch.setattr(main, "_refresh_profiles", lambda select_profile_id=None: True)
+
+    main.render_profile_section()
+
+    assert fake_st.session_state["create_profile_form_goals_editor"] == ["Muscle Gain"]
+    fake_st.session_state["create_profile_form_goals_editor"] = ["Run a marathon"]
+    main._toggle_ui_theme()
+    assert fake_st.session_state[main.UI_THEME_SESSION_KEY] == "dark"
+    assert fake_st.session_state[main.PROFILE_UI_MODE_SESSION_KEY] == main.PROFILE_UI_MODE_CREATE
+    assert fake_st.session_state["create_profile_form_goals_editor"] == ["Run a marathon"]
+    main._toggle_ui_theme()
+    assert fake_st.session_state[main.UI_THEME_SESSION_KEY] == "light"
+    assert fake_st.session_state[main.PROFILE_UI_MODE_SESSION_KEY] == main.PROFILE_UI_MODE_CREATE
+    assert fake_st.session_state["create_profile_form_goals_editor"] == ["Run a marathon"]
+
+
+def test_create_mode_preserves_current_theme_and_cancel_exits_without_persistence(monkeypatch):
+    fake_st = FakeStreamlit()
+    fake_st.private_ui_allowed = True
+    selected_profile = {"_id": "profile-a", "name": "A", "goals": ["Fat Loss"]}
+    seed_authenticated_session(fake_st)
+    fake_st.session_state.update(
+        {
+            main.PROFILE_UI_MODE_SESSION_KEY: main.PROFILE_UI_MODE_CREATE,
+            main.UI_THEME_SESSION_KEY: "dark",
+            "profiles": [selected_profile],
+            "selected_profile_id": "profile-a",
+            "selected_profile": selected_profile,
+            "create_profile_form_name": "Unsaved",
+            "create_profile_form_goals_editor": ["Unsaved goal"],
+        }
+    )
+    fake_st.button_values["cancel_create_profile"] = True
+    monkeypatch.setattr(main, "st", fake_st)
+
+    def fail_persistence(*args, **kwargs):
+        raise AssertionError("cancel must not persist")
+
+    monkeypatch.setattr(main.profiles, "create_new_profile", fail_persistence)
+    monkeypatch.setattr(main.db, "create_profile", fail_persistence)
+
+    try:
+        main.render_profile_section()
+    except RerunCalled:
+        pass
+    else:
+        raise AssertionError("cancel should rerun")
+
+    assert fake_st.session_state[main.PROFILE_UI_MODE_SESSION_KEY] == main.PROFILE_UI_MODE_SELECTED
+    assert fake_st.session_state[main.UI_THEME_SESSION_KEY] == "dark"
+    assert fake_st.session_state["selected_profile_id"] == "profile-a"
+    assert fake_st.session_state["selected_profile"] == selected_profile
+    assert "create_profile_form_name" not in fake_st.session_state
+    assert "create_profile_form_goals_editor" not in fake_st.session_state
+
+
+def test_successful_create_exits_create_mode_and_uses_profile_service(monkeypatch):
+    fake_st = FakeStreamlit()
+    fake_st.submit_value = True
+    seed_authenticated_session(fake_st, account_id="account-a")
+    fake_st.session_state.update(
+        {
+            main.PROFILE_UI_MODE_SESSION_KEY: main.PROFILE_UI_MODE_CREATE,
+            "create_profile_form_goals_editor": ["Run a marathon"],
+        }
+    )
+    fake_st.input_values = {
+        "Name": "Profile A",
+        "Age": 31,
+        "Weight": 72.5,
+        "Height": 180.0,
+        "Gender": "Male",
+        "Activity Level": "Sedentary",
+    }
+    monkeypatch.setattr(main, "st", fake_st)
+    calls = []
+
+    def fake_create_new_profile(**kwargs):
+        calls.append(kwargs)
+        return "profile-new"
+
+    monkeypatch.setattr(main.profiles, "create_new_profile", fake_create_new_profile)
+    monkeypatch.setattr(
+        main.db,
+        "create_profile",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("main.py must use profiles service path")
+        ),
+    )
+    monkeypatch.setattr(main, "_refresh_profiles", lambda select_profile_id=None: True)
+
+    try:
+        main._render_profile_form(mode="create")
+    except RerunCalled:
+        pass
+    else:
+        raise AssertionError("profile creation should rerun")
+
+    assert calls[0]["account_id"] == "account-a"
+    assert calls[0]["goals"] == ["Run a marathon"]
+    assert fake_st.session_state[main.PROFILE_UI_MODE_SESSION_KEY] == main.PROFILE_UI_MODE_SELECTED
+    assert "create_profile_form_goals_editor" not in fake_st.session_state
+
+
+def test_normal_profile_section_removes_create_profile_tab_as_primary_entry(monkeypatch):
+    fake_st = FakeStreamlit()
+    fake_st.private_ui_allowed = True
+    selected_profile = {
+        "_id": "profile-a",
+        "name": "Profile A",
+        "gender": "Male",
+        "activity_level": "Sedentary",
+        "goals": ["Fat Loss"],
+    }
+    seed_authenticated_session(fake_st)
+    fake_st.session_state.update(
+        {
+            main.PROFILE_UI_MODE_SESSION_KEY: main.PROFILE_UI_MODE_SELECTED,
+            "profiles": [selected_profile],
+            "selected_profile_id": "profile-a",
+            "selected_profile": selected_profile,
+        }
+    )
+    monkeypatch.setattr(main, "st", fake_st)
+
+    main.render_profile_section()
+
+    assert ("Create profile", "Edit selected") not in fake_st.tab_labels
+    assert not any("Create profile" in labels for labels in fake_st.tab_labels)
+    assert fake_st.radio_calls[0][0] == "Gender"
+    assert fake_st.selectbox_calls[1][0] == "Activity Level"
+    submit_labels = [label for label, _kwargs in fake_st.form_submit_calls]
+    assert "Save changes" in submit_labels
+    assert "Create profile" not in submit_labels
+
+
+def test_prompt_10_source_does_not_add_toolbar_or_javascript_hacks():
+    source = Path("main.py").read_text()
+
+    forbidden_fragments = (
+        "components.html",
+        "<script",
+        "position: fixed",
+        "position: absolute",
+        "st-emotion-cache",
+        ".css-",
+        "Deploy",
+        "MainMenu",
+        "toolbar",
+    )
+    for fragment in forbidden_fragments:
+        assert fragment not in source
 
 
 def test_ui_theme_css_uses_tokens_without_js_or_private_api(monkeypatch):

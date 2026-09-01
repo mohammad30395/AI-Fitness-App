@@ -40,11 +40,15 @@ SESSION_DEFAULTS = {
     "notes_error": None,
     "confirm_delete_note_id": None,
     "ask_ai_error": None,
+    "profile_ui_mode": "selected",
 }
 
 UI_THEME_SESSION_KEY = "ui_theme"
 UI_THEME_OPTIONS = ("light", "dark")
 DEFAULT_UI_THEME = "light"
+PROFILE_UI_MODE_SESSION_KEY = "profile_ui_mode"
+PROFILE_UI_MODE_SELECTED = "selected"
+PROFILE_UI_MODE_CREATE = "create"
 UI_THEME_TOKEN_NAMES = (
     "background",
     "surface",
@@ -355,19 +359,23 @@ div[data-baseweb="select"]:focus-within > div {{
     )
 
 
-def _render_theme_control() -> None:
+def _render_theme_button() -> None:
     theme = _current_ui_theme()
     label = "🌙 Dark" if theme == "light" else "☀️ Light"
     help_text = "Switch to dark mode" if theme == "light" else "Switch to light mode"
+    st.button(
+        label,
+        key="ui_theme_toggle",
+        help=help_text,
+        on_click=_toggle_ui_theme,
+        use_container_width=True,
+    )
+
+
+def _render_theme_control() -> None:
     _, control_col = st.columns((6, 1), vertical_alignment="center")
     with control_col:
-        st.button(
-            label,
-            key="ui_theme_toggle",
-            help=help_text,
-            on_click=_toggle_ui_theme,
-            use_container_width=True,
-        )
+        _render_theme_button()
 
 
 def _initialize_auth_session_state() -> None:
@@ -476,10 +484,62 @@ def _enforce_authentication_gate() -> None:
 
 
 def _render_authenticated_header() -> None:
-    st.caption(f"Signed in as {st.session_state['username']}")
-    if st.button("Logout"):
+    account_col, _, theme_col, create_col, logout_col = st.columns(
+        (4, 2, 1, 1.6, 1),
+        vertical_alignment="center",
+    )
+    with account_col:
+        st.caption(f"Signed in as {st.session_state['username']}")
+    with theme_col:
+        _render_theme_button()
+    with create_col:
+        st.button(
+            "Create Profile",
+            key="profile_create_action",
+            help="Create a new profile",
+            on_click=_enter_create_profile_mode,
+            use_container_width=True,
+        )
+    with logout_col:
+        logout_clicked = st.button(
+            "Logout",
+            key="logout_button",
+            help="Sign out",
+            use_container_width=True,
+        )
+    if logout_clicked:
         _reset_session_for_logout()
         st.rerun()
+
+
+def _current_profile_ui_mode() -> str:
+    mode = st.session_state.get(PROFILE_UI_MODE_SESSION_KEY)
+    if mode not in {PROFILE_UI_MODE_SELECTED, PROFILE_UI_MODE_CREATE}:
+        mode = PROFILE_UI_MODE_SELECTED
+        st.session_state[PROFILE_UI_MODE_SESSION_KEY] = mode
+    return mode
+
+
+def _enter_create_profile_mode() -> None:
+    st.session_state[PROFILE_UI_MODE_SESSION_KEY] = PROFILE_UI_MODE_CREATE
+
+
+def _clear_create_profile_form_state() -> None:
+    for key in (
+        _profile_choice_widget_key("create_profile_form", "gender_choice"),
+        _profile_choice_widget_key("create_profile_form", "activity_level_choice"),
+        "create_profile_form_name",
+        "create_profile_form_age",
+        "create_profile_form_weight",
+        "create_profile_form_height",
+    ):
+        st.session_state.pop(key, None)
+    _clear_create_goal_editor_state()
+
+
+def _exit_create_profile_mode() -> None:
+    st.session_state[PROFILE_UI_MODE_SESSION_KEY] = PROFILE_UI_MODE_SELECTED
+    _clear_create_profile_form_state()
 
 
 def _goals_from_text(goals_text: str) -> list[str]:
@@ -940,7 +1000,8 @@ def _render_profile_form(*, mode: str, profile: dict | None = None) -> None:
                 account_id=_trusted_account_id(),
                 **profile_payload,
             )
-            _clear_create_goal_editor_state()
+            st.session_state[PROFILE_UI_MODE_SESSION_KEY] = PROFILE_UI_MODE_SELECTED
+            _clear_create_profile_form_state()
             _refresh_profiles(new_profile_id)
             st.session_state["profile_success"] = "Profile created."
         st.session_state["ui_error"] = None
@@ -955,10 +1016,23 @@ def _render_profile_form(*, mode: str, profile: dict | None = None) -> None:
 def render_profile_section() -> None:
     st.header("Profile")
     with st.container(border=True):
-        st.caption("Create or select the active profile used by every section below.")
+        profile_mode = _current_profile_ui_mode()
+        st.caption("Select or edit the active profile used by every section below.")
         if not st.session_state.get("profiles") and st.session_state.get("ui_error") is None:
             with st.spinner("Loading profiles..."):
                 _refresh_profiles()
+
+        if profile_mode == PROFILE_UI_MODE_CREATE:
+            st.subheader("Create Profile")
+            if st.button(
+                "Back to selected profile",
+                key="cancel_create_profile",
+                help="Leave create mode without saving",
+            ):
+                _exit_create_profile_mode()
+                st.rerun()
+            _render_profile_form(mode="create")
+            return
 
         refresh_col, selector_col = st.columns((1, 3))
         with refresh_col:
@@ -999,7 +1073,7 @@ def render_profile_section() -> None:
                     st.rerun()
         else:
             with selector_col:
-                st.info("No profiles yet. Create one below to unlock nutrition, notes, and Ask AI.")
+                st.info("No profiles yet. Use Create Profile in the top action row.")
 
         selected_profile = st.session_state.get("selected_profile")
         if selected_profile:
@@ -1011,16 +1085,9 @@ def render_profile_section() -> None:
                 f"Activity: {selected_profile.get('activity_level') or 'not set'}"
             )
             summary_cols[2].caption(f"Goals: {len(goals) if isinstance(goals, list) else 0}")
-
-        create_tab, edit_tab = st.tabs(["Create profile", "Edit selected"])
-        with create_tab:
-            _render_profile_form(mode="create")
-
-        with edit_tab:
-            if selected_profile:
-                _render_profile_form(mode="edit", profile=selected_profile)
-            else:
-                st.info("Select or create a profile before editing.")
+            _render_profile_form(mode="edit", profile=selected_profile)
+        else:
+            st.info("Select a profile before editing, or use Create Profile in the top action row.")
 
 
 def render_nutrition_section() -> None:
@@ -1331,7 +1398,6 @@ def main() -> None:
     )
     _initialize_ui_theme_state()
     _apply_ui_theme()
-    _render_theme_control()
     _initialize_auth_session_state()
     _enforce_authentication_gate()
     initialize_session_state()
