@@ -667,3 +667,115 @@ GENERAL
 ### Remaining limitations
 - Automated acceptance passed, but final visual sign-off requires the manual browser checklist.
 - Runtime theme preference is session-state based only and does not persist to Astra or browser localStorage.
+
+## FIX Prompt-08 - Runtime/UI Failure Audit
+
+### AI failure observations
+- `Generate with AI` calls `ai.get_macros(...)` from the Nutrition section after building profile context and goal text from the selected profile.
+- `Ask AI` calls `ai.ask_ai(...)` from the Ask AI section after building profile context and passing trusted account/profile/session identifiers.
+- Both live diagnostic calls reached local Langflow and failed after Langflow started executing the graph.
+
+### Langflow client contract
+- Langflow run endpoint shape is `LANGFLOW_URL/api/v1/run/{flow_id}`.
+- Requests use `input_type="chat"` and `output_type="chat"`.
+- Macro flow sends the profile context as `input_value` and sends goals through the configured goals component tweak.
+- Ask AI sends the question as `input_value`, profile context through the configured profile prompt tweak, and a JSON metadata filter through the configured vector-store/search component tweak.
+- Current HTTP error handling raises a sanitized `LangflowHTTPError` with only the status code and does not expose the response body to the UI.
+
+### Sanitized configuration status
+- `LANGFLOW_URL`: SET, safe host `127.0.0.1`, port `7860`, scheme `http`.
+- `LANGFLOW_API_KEY`: SET.
+- `MACRO_FLOW_ID`: SET.
+- `ASK_AI_FLOW_ID`: SET.
+- `MACRO_PROFILE_COMPONENT_ID`: SET.
+- `MACRO_GOALS_COMPONENT_ID`: SET.
+- `ASK_PROFILE_COMPONENT_ID`: SET.
+- `ASK_USER_ID_COMPONENT_ID`: SET.
+
+### Local Langflow reachability
+- Langflow root returned HTTP 200.
+- `/health` returned HTTP 200 with an OK status.
+- `/api/v1/version` returned HTTP 200 and reported Langflow `1.11.3`.
+- `/api/v1/config` returned HTTP 200.
+- `/api/v1/` returned HTTP 404, which is expected for that generic path and does not disprove run endpoint availability.
+
+### Macro diagnostic result
+- Diagnostic run: synthetic local macro request through `scripts/test_macro_flow.py`, followed by one sanitized direct POST to the configured macro flow endpoint.
+- Failure layer: inside Langflow graph execution while building the OpenRouter component.
+- HTTP status: Langflow returned 500 to the client.
+- Sanitized error: upstream OpenRouter returned 402 because the request requires more credits or fewer max tokens.
+- Proven root cause: local Langflow is reachable and the configured macro flow endpoint is executing; the macro failure is caused by upstream OpenRouter credit/token budget rejection.
+- Remaining candidate causes: future failures may still occur from malformed model output, invalid flow/component tweaks, network interruption, or config drift, but those were not the observed cause of this run.
+
+### Ask AI diagnostic result
+- Diagnostic run: synthetic local Ask AI request using non-real account/profile/session IDs, followed by one sanitized direct POST to the configured Ask AI flow endpoint.
+- Failure layer: inside Langflow graph execution while building the router OpenRouter model component.
+- HTTP status: Langflow returned 500 to the client.
+- Sanitized error: upstream OpenRouter returned 402 because the request requires more credits or fewer max tokens.
+- Proven root cause: local Langflow is reachable and the configured Ask AI flow endpoint is executing; the Ask AI failure is caused by upstream OpenRouter credit/token budget rejection before downstream advice generation can complete.
+- Remaining candidate causes: vector-store filtering, profile tweak shape, downstream advice prompt behavior, malformed model output, and config drift remain candidates for separate future issues because this run failed earlier at the router model.
+
+### Error-handling findings
+- The app currently shows generic AI failure text and logs a sanitized exception path through the existing `LangflowHTTPError`.
+- `ai.run_flow` intentionally discards Langflow response bodies on HTTP errors, so the Streamlit UI cannot distinguish local Langflow downtime, missing flow IDs, upstream provider billing failures, provider rate limits, or invalid graph configuration.
+- Recommended safe distinctions: separate configuration errors, local connection errors, Langflow 4xx/5xx graph errors, upstream provider billing/quota errors, timeout errors, and response-shape/JSON-parse errors without displaying secrets or raw provider payloads.
+
+### Current top-right header structure
+- The theme toggle renders near the top-right before authentication initialization.
+- The authenticated header later renders signed-in account text and a Logout button.
+- Create profile remains inside the Profile section tab UI, not in the top-right header.
+- Recommended future header order: Theme toggle, Create Profile entry point, Logout.
+
+### Desired header structure
+- Keep the runtime theme control first.
+- Add a compact top-right Create Profile action after the theme control.
+- Keep Logout last.
+- Avoid toolbar collision by using one shared header row instead of separate top-right column groups rendered at different points in startup.
+
+### Current profile workflow
+- The Profile section shows a selector for the active profile.
+- The selected profile summary currently shows profile ID, activity, and goals count.
+- Create profile is always available in a tab beside Edit selected.
+- Edit selected is always present when a selected profile exists and saves directly through the existing profile service boundary.
+
+### Desired profile workflow
+- Select a profile first.
+- Show a concise selected-profile summary.
+- Enter edit mode explicitly.
+- Save or cancel edits without mixing create and edit forms in adjacent always-visible tabs.
+- Keep persistence limited to the profile service layer.
+
+### Goal tooltip findings
+- The current help mechanism is Streamlit button `help` text on the add and remove goal form submit buttons.
+- Light-mode issue to verify visually: tooltip/popover contrast may be weak against the custom light theme tokens.
+- Dark-mode issue to verify visually: tooltip/popover contrast may be weak or inconsistent if Streamlit renders it outside the themed form container.
+- Probable CSS cause: runtime CSS customizes broad Streamlit button, input, select, radio, expander, tab, and tooltip selectors while Streamlit tooltip markup can vary by version.
+- Stable fix strategy: style only documented/stable wrapper scopes where possible, keep tooltip colors tokenized for both themes, and prefer robust labels/ARIA help over brittle generated class selectors.
+
+### Theme CSS findings
+- The runtime theme uses CSS custom properties generated from `UI_THEME_TOKENS`.
+- Light and dark themes share the same token names.
+- The CSS avoids generated hash class selectors and private Streamlit theme mutation.
+- Risk remains around broad selectors affecting future Streamlit markup, especially tooltips and header-adjacent controls.
+
+### Session-state risks
+- Theme state is session-only and does not persist across a fresh browser session.
+- Goals editor state is form/session driven and intentionally does not persist until Create Profile or Save changes is submitted.
+- Multiple top-level rerun triggers are present, so future header/profile workflow changes should preserve selected profile, temporary goals, nutrition draft, notes state, and Ask AI history.
+- Create and edit form keys are distinct, reducing direct state collision risk.
+
+### Test gaps
+- Existing tests cover option contracts, legacy profile values, goals add/remove state, theme token behavior, persistence boundaries, AI client behavior with mocked requests, and broad app resilience.
+- Missing tests: live Langflow/OpenRouter provider error classification, top-right header ordering, create-profile header action state flow, save/cancel edit workflow, and tooltip contrast/visibility in light and dark themes.
+
+### Recommended milestone scope
+- FIX Prompt-09: implement safe AI error classification and user-facing distinctions without exposing secrets.
+- FIX Prompt-10: consolidate the top-right header into a single Theme -> Create Profile -> Logout control row.
+- FIX Prompt-11: simplify the profile workflow to Select -> Summary -> Edit -> Save/Cancel.
+- FIX Prompt-12: harden goal tooltip styling and accessibility across light/dark themes.
+- FIX Prompt-13: add regression coverage for the new header/profile/tooltip/error-handling behavior and run final release readiness checks.
+
+### Baseline verification
+- Application source and tests were not intentionally changed for this audit.
+- The only intended repository change for FIX Prompt-08 is this documentation update.
+- Safe verification commands are listed in the final audit response.
