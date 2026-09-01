@@ -58,6 +58,8 @@ class FakeStreamlit:
         self.columns_calls = []
         self.subheader_calls = []
         self.submit_value = False
+        self.form_submit_values = {}
+        self.form_submit_calls = []
         self.button_values = {}
         self.tab_labels = []
         self.headers = []
@@ -96,7 +98,12 @@ class FakeStreamlit:
 
     def text_input(self, label, **kwargs):
         self.text_input_calls.append((label, kwargs))
-        return self.input_values.get(label, "")
+        key = kwargs.get("key")
+        if label in self.input_values:
+            return self.input_values[label]
+        if key in self.session_state:
+            return self.session_state[key]
+        return kwargs.get("value", "")
 
     def text_area(self, label, **kwargs):
         return self.input_values.get(label, kwargs.get("value", ""))
@@ -128,7 +135,14 @@ class FakeStreamlit:
         return self.input_values.get(label, kwargs.get("value"))
 
     def form_submit_button(self, label, **kwargs):
-        return self.submit_value
+        self.form_submit_calls.append((label, kwargs))
+        key = kwargs.get("key")
+        clicked = self.form_submit_values.get(key, False)
+        if key is None:
+            clicked = self.submit_value
+        if clicked and kwargs.get("on_click"):
+            kwargs["on_click"](*(kwargs.get("args") or ()), **(kwargs.get("kwargs") or {}))
+        return clicked
 
     def button(self, label, **kwargs):
         return self.button_values.get(label, False)
@@ -651,7 +665,6 @@ def test_profile_creation_passes_trusted_account_id_without_owner_field(monkeypa
         "Height": 180.0,
         "Gender": "Male",
         "Activity Level": "Moderately Active",
-        "Select Your Goals": ["Muscle Gain"],
         "owner_account_id": "account-b",
     }
     monkeypatch.setattr(main, "st", fake_st)
@@ -743,7 +756,7 @@ def test_profile_edit_passes_trusted_account_id_and_profile_id(monkeypatch):
     assert "owner_account_id" not in calls[0][2]
 
 
-def test_profile_create_uses_native_choice_widgets_with_canonical_options(monkeypatch):
+def test_profile_create_uses_native_choice_widgets_and_goal_editor(monkeypatch):
     fake_st = FakeStreamlit()
     monkeypatch.setattr(main, "st", fake_st)
 
@@ -770,21 +783,32 @@ def test_profile_create_uses_native_choice_widgets_with_canonical_options(monkey
             },
         )
     ]
-    assert fake_st.multiselect_calls == [
-        (
-            "Select Your Goals",
-            {
-                "options": main.GOAL_OPTIONS,
-                "default": [],
-                "key": "create_profile_form_goals_multiselect",
-            },
-        )
+    assert fake_st.multiselect_calls == []
+    assert fake_st.session_state["create_profile_form_goals_editor"] == ["Muscle Gain"]
+    assert fake_st.columns_calls == [
+        (3, {}),
+        ((5, 1), {"vertical_alignment": "center"}),
+        ((5, 1), {}),
     ]
-    assert fake_st.columns_calls == [(3, {})]
     assert fake_st.subheader_calls == [(("Goals",), {})]
+    assert any(label == "−" for label, _kwargs in fake_st.form_submit_calls)
+    assert any(label == "+" for label, _kwargs in fake_st.form_submit_calls)
 
 
-def test_profile_edit_initializes_canonical_values(monkeypatch):
+def test_new_profile_goal_editor_initializes_default_once_and_allows_removal(monkeypatch):
+    fake_st = FakeStreamlit()
+    fake_st.form_submit_values["create_profile_form_goals_editor_remove_0"] = True
+    monkeypatch.setattr(main, "st", fake_st)
+
+    main._render_profile_form(mode="create")
+    assert fake_st.session_state["create_profile_form_goals_editor"] == []
+
+    fake_st.form_submit_values = {}
+    main._render_profile_form(mode="create")
+    assert fake_st.session_state["create_profile_form_goals_editor"] == []
+
+
+def test_existing_profile_goal_editor_initializes_exactly_without_default(monkeypatch):
     fake_st = FakeStreamlit()
     monkeypatch.setattr(main, "st", fake_st)
 
@@ -794,7 +818,7 @@ def test_profile_edit_initializes_canonical_values(monkeypatch):
             "_id": "profile-a",
             "gender": "Female",
             "activity_level": "Very Active",
-            "goals": ["Fat Loss"],
+            "goals": ["Build strength", "Improve endurance"],
         },
     )
 
@@ -802,54 +826,15 @@ def test_profile_edit_initializes_canonical_values(monkeypatch):
     assert fake_st.radio_calls[0][1]["index"] == 1
     assert fake_st.selectbox_calls[0][1]["options"] == main.ACTIVITY_LEVEL_OPTIONS
     assert fake_st.selectbox_calls[0][1]["index"] == 3
-    assert fake_st.multiselect_calls[0][1]["options"] == main.GOAL_OPTIONS
-    assert fake_st.multiselect_calls[0][1]["default"] == ["Fat Loss"]
-
-
-def test_profile_edit_initializes_legacy_gender_activity_and_goals(monkeypatch):
-    fake_st = FakeStreamlit()
-    monkeypatch.setattr(main, "st", fake_st)
-
-    main._render_profile_form(
-        mode="edit",
-        profile={
-            "_id": "profile-a",
-            "gender": "unspecified",
-            "activity_level": "moderate",
-            "goals": ["Build strength", "Improve endurance"],
-        },
-    )
-
-    assert fake_st.radio_calls[0][1]["options"] == (
-        "unspecified",
-        "Male",
-        "Female",
-        "Other",
-    )
-    assert fake_st.radio_calls[0][1]["index"] == 0
-    assert fake_st.selectbox_calls[0][1]["options"] == (
-        "moderate",
-        "Sedentary",
-        "Lightly Active",
-        "Moderately Active",
-        "Very Active",
-        "Super Active",
-    )
-    assert fake_st.selectbox_calls[0][1]["index"] == 0
-    assert fake_st.multiselect_calls[0][1]["options"] == (
-        "Muscle Gain",
-        "Fat Loss",
-        "Stay Active",
-        "Build strength",
-        "Improve endurance",
-    )
-    assert fake_st.multiselect_calls[0][1]["default"] == [
+    assert fake_st.multiselect_calls == []
+    assert fake_st.session_state["edit_profile_form_goals_editor_profile-a"] == [
         "Build strength",
         "Improve endurance",
     ]
+    assert "Muscle Gain" not in fake_st.session_state["edit_profile_form_goals_editor_profile-a"]
 
 
-def test_profile_edit_initializes_active_legacy_activity(monkeypatch):
+def test_existing_empty_profile_goal_editor_remains_empty(monkeypatch):
     fake_st = FakeStreamlit()
     monkeypatch.setattr(main, "st", fake_st)
 
@@ -858,43 +843,138 @@ def test_profile_edit_initializes_active_legacy_activity(monkeypatch):
         profile={"_id": "profile-a", "activity_level": "active", "goals": []},
     )
 
+    assert fake_st.session_state["edit_profile_form_goals_editor_profile-a"] == []
     assert fake_st.selectbox_calls[0][1]["options"][0] == "active"
     assert fake_st.selectbox_calls[0][1]["index"] == 0
-    assert "Very Active" in fake_st.selectbox_calls[0][1]["options"]
 
 
-def test_profile_edit_initializes_mixed_canonical_and_legacy_goals(monkeypatch):
+def test_goal_editor_adds_custom_goal_and_trims_whitespace(monkeypatch):
     fake_st = FakeStreamlit()
-    monkeypatch.setattr(main, "st", fake_st)
-
-    main._render_profile_form(
-        mode="edit",
-        profile={"_id": "profile-a", "goals": ["Muscle Gain", "Build strength"]},
-    )
-
-    assert fake_st.multiselect_calls[0][1]["options"] == (
-        "Muscle Gain",
-        "Fat Loss",
-        "Stay Active",
-        "Build strength",
-    )
-    assert fake_st.multiselect_calls[0][1]["default"] == ["Muscle Gain", "Build strength"]
-
-
-def test_profile_create_goal_options_do_not_include_other_profile_legacy_goals(monkeypatch):
-    fake_st = FakeStreamlit()
-    fake_st.session_state["profiles"] = [{"_id": "profile-a", "goals": ["Build strength"]}]
+    fake_st.session_state["create_profile_form_goals_editor"] = []
+    fake_st.session_state["create_profile_form_goal_add_open"] = True
+    fake_st.session_state["create_profile_form_goal_input"] = "  Run a marathon  "
+    fake_st.form_submit_values["create_profile_form_goals_editor_add_goal"] = True
     monkeypatch.setattr(main, "st", fake_st)
 
     main._render_profile_form(mode="create")
 
-    assert fake_st.multiselect_calls[0][1]["options"] == main.GOAL_OPTIONS
+    assert fake_st.session_state["create_profile_form_goals_editor"] == ["Run a marathon"]
+    assert fake_st.session_state["create_profile_form_goal_input"] == ""
+    assert fake_st.session_state["create_profile_form_goal_add_open"] is False
+    assert fake_st.session_state["create_profile_form_goal_error"] is None
 
 
-def test_profile_multiselect_submission_remains_list_without_text_parsing(monkeypatch):
+def test_goal_editor_rejects_blank_and_duplicate_goals(monkeypatch):
+    fake_st = FakeStreamlit()
+    fake_st.session_state["create_profile_form_goals_editor"] = ["Muscle Gain"]
+    fake_st.session_state["create_profile_form_goal_add_open"] = True
+    fake_st.session_state["create_profile_form_goal_input"] = "   "
+    fake_st.form_submit_values["create_profile_form_goals_editor_add_goal"] = True
+    monkeypatch.setattr(main, "st", fake_st)
+
+    main._render_profile_form(mode="create")
+
+    assert fake_st.session_state["create_profile_form_goals_editor"] == ["Muscle Gain"]
+    assert fake_st.session_state["create_profile_form_goal_error"] == "Enter a goal before adding."
+
+    fake_st.session_state["create_profile_form_goal_input"] = "Muscle Gain"
+    main._render_profile_form(mode="create")
+
+    assert fake_st.session_state["create_profile_form_goals_editor"] == ["Muscle Gain"]
+    assert fake_st.session_state["create_profile_form_goal_error"] == "That goal is already in the list."
+
+
+def test_goal_editor_adds_multiple_custom_goals(monkeypatch):
+    fake_st = FakeStreamlit()
+    fake_st.session_state["create_profile_form_goals_editor"] = []
+    monkeypatch.setattr(main, "st", fake_st)
+
+    main._add_goal_to_editor(
+        "create_profile_form_goals_editor",
+        "goal_input",
+        "goal_error",
+        "goal_add_open",
+    )
+    fake_st.session_state["goal_input"] = "Improve flexibility"
+    main._add_goal_to_editor(
+        "create_profile_form_goals_editor",
+        "goal_input",
+        "goal_error",
+        "goal_add_open",
+    )
+    fake_st.session_state["goal_input"] = "Bench press 100 kg"
+    main._add_goal_to_editor(
+        "create_profile_form_goals_editor",
+        "goal_input",
+        "goal_error",
+        "goal_add_open",
+    )
+
+    assert fake_st.session_state["create_profile_form_goals_editor"] == [
+        "Improve flexibility",
+        "Bench press 100 kg",
+    ]
+
+
+def test_goal_editor_removes_one_goal_and_can_remove_final_goal(monkeypatch):
+    fake_st = FakeStreamlit()
+    fake_st.session_state["create_profile_form_goals_editor"] = [
+        "Muscle Gain",
+        "Run a marathon",
+        "Improve flexibility",
+    ]
+    monkeypatch.setattr(main, "st", fake_st)
+
+    main._remove_goal_from_editor("create_profile_form_goals_editor", 1, "goal_error")
+    assert fake_st.session_state["create_profile_form_goals_editor"] == [
+        "Muscle Gain",
+        "Improve flexibility",
+    ]
+
+    main._remove_goal_from_editor("create_profile_form_goals_editor", 1, "goal_error")
+    main._remove_goal_from_editor("create_profile_form_goals_editor", 0, "goal_error")
+    assert fake_st.session_state["create_profile_form_goals_editor"] == []
+
+
+def test_goal_editor_actions_do_not_call_profile_persistence(monkeypatch):
+    fake_st = FakeStreamlit()
+    fake_st.form_submit_values["create_profile_form_goals_editor_remove_0"] = True
+    monkeypatch.setattr(main, "st", fake_st)
+
+    def fail_create(**kwargs):
+        raise AssertionError("create should not be called for goal editor actions")
+
+    monkeypatch.setattr(main.profiles, "create_new_profile", fail_create)
+
+    main._render_profile_form(mode="create")
+
+    assert fake_st.session_state["create_profile_form_goals_editor"] == []
+
+
+def test_goal_editor_plus_opens_add_input_without_persistence(monkeypatch):
+    fake_st = FakeStreamlit()
+    fake_st.form_submit_values["create_profile_form_goals_editor_show_add_goal"] = True
+    monkeypatch.setattr(main, "st", fake_st)
+
+    def fail_create(**kwargs):
+        raise AssertionError("create should not be called by +")
+
+    monkeypatch.setattr(main.profiles, "create_new_profile", fail_create)
+
+    main._render_profile_form(mode="create")
+
+    assert fake_st.session_state["create_profile_form_goal_add_open"] is True
+    assert fake_st.session_state["create_profile_form_goal_error"] is None
+
+
+def test_profile_submit_receives_current_goal_editor_list(monkeypatch):
     fake_st = FakeStreamlit()
     fake_st.submit_value = True
     seed_authenticated_session(fake_st, account_id="account-a")
+    fake_st.session_state["create_profile_form_goals_editor"] = [
+        "Run a marathon",
+        "Improve flexibility",
+    ]
     fake_st.input_values = {
         "Name": "Profile A",
         "Age": 31,
@@ -902,7 +982,6 @@ def test_profile_multiselect_submission_remains_list_without_text_parsing(monkey
         "Height": 180.0,
         "Gender": "Male",
         "Activity Level": "Sedentary",
-        "Select Your Goals": ["Build strength\nImprove endurance"],
     }
     monkeypatch.setattr(main, "st", fake_st)
     calls = []
@@ -921,7 +1000,67 @@ def test_profile_multiselect_submission_remains_list_without_text_parsing(monkey
     else:
         raise AssertionError("profile creation should rerun")
 
-    assert calls[0]["goals"] == ["Build strength\nImprove endurance"]
+    assert calls[0]["goals"] == ["Run a marathon", "Improve flexibility"]
+    assert "create_profile_form_goals_editor" not in fake_st.session_state
+
+
+def test_profile_switching_refreshes_goal_editor_state_both_directions(monkeypatch):
+    fake_st = FakeStreamlit()
+    monkeypatch.setattr(main, "st", fake_st)
+
+    main._set_selected_profile({"_id": "profile-a", "goals": ["Fat Loss"]})
+    main._render_profile_form(mode="edit", profile=fake_st.session_state["selected_profile"])
+    assert fake_st.session_state["edit_profile_form_goals_editor_profile-a"] == ["Fat Loss"]
+
+    main._set_selected_profile({"_id": "profile-b", "goals": ["Stay Active", "Run 5 km"]})
+    main._render_profile_form(mode="edit", profile=fake_st.session_state["selected_profile"])
+    assert "edit_profile_form_goals_editor_profile-a" not in fake_st.session_state
+    assert fake_st.session_state["edit_profile_form_goals_editor_profile-b"] == [
+        "Stay Active",
+        "Run 5 km",
+    ]
+
+    main._set_selected_profile({"_id": "profile-a", "goals": ["Fat Loss"]})
+    main._render_profile_form(mode="edit", profile=fake_st.session_state["selected_profile"])
+    assert "edit_profile_form_goals_editor_profile-b" not in fake_st.session_state
+    assert fake_st.session_state["edit_profile_form_goals_editor_profile-a"] == ["Fat Loss"]
+
+
+def test_successful_edit_save_synchronizes_goal_editor_state(monkeypatch):
+    fake_st = FakeStreamlit()
+    fake_st.submit_value = True
+    seed_authenticated_session(fake_st, account_id="account-a")
+    fake_st.session_state["selected_profile_id"] = "profile-a"
+    fake_st.session_state["edit_profile_form_goals_editor_profile-a"] = ["Run a marathon"]
+    fake_st.input_values = {
+        "Name": "Profile A",
+        "Age": 32,
+        "Weight": 74.0,
+        "Height": 181.0,
+        "Gender": "Male",
+        "Activity Level": "Sedentary",
+    }
+    monkeypatch.setattr(main, "st", fake_st)
+
+    def fake_save_profile_changes(account_id, profile_id, **updates):
+        return {"_id": profile_id, **updates}
+
+    monkeypatch.setattr(main.profiles, "save_profile_changes", fake_save_profile_changes)
+    monkeypatch.setattr(main, "_refresh_profiles", lambda select_profile_id=None: True)
+
+    try:
+        main._render_profile_form(
+            mode="edit",
+            profile={"_id": "profile-a", "gender": "Male", "activity_level": "Sedentary"},
+        )
+    except RerunCalled:
+        pass
+    else:
+        raise AssertionError("profile edit should rerun")
+
+    assert fake_st.session_state["edit_profile_form_goals_editor_profile-a"] == [
+        "Run a marathon"
+    ]
 
 
 def test_profile_edit_saves_intentional_canonical_replacements(monkeypatch):
@@ -929,6 +1068,7 @@ def test_profile_edit_saves_intentional_canonical_replacements(monkeypatch):
     fake_st.submit_value = True
     seed_authenticated_session(fake_st, account_id="account-a")
     fake_st.session_state["selected_profile_id"] = "profile-a"
+    fake_st.session_state["edit_profile_form_goals_editor_profile-a"] = ["Muscle Gain"]
     fake_st.input_values = {
         "Name": "Profile A",
         "Age": 32,
@@ -936,7 +1076,6 @@ def test_profile_edit_saves_intentional_canonical_replacements(monkeypatch):
         "Height": 181.0,
         "Gender": "Other",
         "Activity Level": "Very Active",
-        "Select Your Goals": ["Muscle Gain"],
     }
     monkeypatch.setattr(main, "st", fake_st)
     calls = []
@@ -980,6 +1119,10 @@ def test_selected_profile_change_clears_only_edit_choice_widget_state(monkeypatc
             "edit_profile_form_gender_choice": "Male",
             "edit_profile_form_activity_level_choice": "Sedentary",
             "edit_profile_form_goals_multiselect": ["Fat Loss"],
+            "edit_profile_form_goals_editor_profile-a": ["Fat Loss"],
+            "edit_profile_form_goal_input_profile-a": "Run",
+            "edit_profile_form_goal_add_open_profile-a": True,
+            "edit_profile_form_goal_error_profile-a": "Duplicate",
         }
     )
     monkeypatch.setattr(main, "st", fake_st)
@@ -996,6 +1139,10 @@ def test_selected_profile_change_clears_only_edit_choice_widget_state(monkeypatc
     assert "edit_profile_form_gender_choice" not in fake_st.session_state
     assert "edit_profile_form_activity_level_choice" not in fake_st.session_state
     assert "edit_profile_form_goals_multiselect" not in fake_st.session_state
+    assert "edit_profile_form_goals_editor_profile-a" not in fake_st.session_state
+    assert "edit_profile_form_goal_input_profile-a" not in fake_st.session_state
+    assert "edit_profile_form_goal_add_open_profile-a" not in fake_st.session_state
+    assert "edit_profile_form_goal_error_profile-a" not in fake_st.session_state
     assert fake_st.session_state["profiles"] == [{"_id": "profile-a"}]
     assert fake_st.session_state["last_ai_answer"] == "existing answer"
 

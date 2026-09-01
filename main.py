@@ -50,10 +50,17 @@ ACTIVITY_LEVEL_OPTIONS = (
     "Super Active",
 )
 GOAL_OPTIONS = ("Muscle Gain", "Fat Loss", "Stay Active")
+DEFAULT_CREATE_GOALS = ("Muscle Gain",)
 PROFILE_CHOICE_WIDGET_SUFFIXES = (
     "gender_choice",
     "activity_level_choice",
     "goals_multiselect",
+)
+EDIT_GOAL_EDITOR_PREFIXES = (
+    "edit_profile_form_goals_editor_",
+    "edit_profile_form_goal_input_",
+    "edit_profile_form_goal_add_open_",
+    "edit_profile_form_goal_error_",
 )
 
 
@@ -256,6 +263,12 @@ def _goals_from_profile(profile: dict | None) -> list[str]:
     return [str(goal).strip() for goal in goals if str(goal).strip()]
 
 
+def _normalize_goal_editor_state(goals) -> list[str]:
+    if not isinstance(goals, list):
+        return []
+    return [str(goal).strip() for goal in goals if str(goal).strip()]
+
+
 def _selected_option_index(options: tuple[str, ...], current_value) -> int | None:
     if current_value is None:
         return None
@@ -272,9 +285,132 @@ def _profile_choice_widget_key(form_key: str, suffix: str) -> str:
     return f"{form_key}_{suffix}"
 
 
+def _goal_editor_key(form_key: str, suffix: str, profile: dict | None = None) -> str:
+    if form_key != "edit_profile_form":
+        return f"{form_key}_{suffix}"
+    profile_id = (profile or {}).get("_id") or "unselected"
+    return f"{form_key}_{suffix}_{profile_id}"
+
+
+def _initialize_goal_editor_state(
+    *,
+    form_key: str,
+    is_edit: bool,
+    profile: dict | None = None,
+) -> str:
+    state_key = _goal_editor_key(form_key, "goals_editor", profile)
+    if state_key not in st.session_state:
+        st.session_state[state_key] = (
+            _goals_from_profile(profile) if is_edit else list(DEFAULT_CREATE_GOALS)
+        )
+    else:
+        st.session_state[state_key] = _normalize_goal_editor_state(st.session_state[state_key])
+    return state_key
+
+
+def _set_goal_editor_state(state_key: str, goals) -> None:
+    st.session_state[state_key] = _normalize_goal_editor_state(goals)
+
+
+def _show_goal_input(open_key: str, error_key: str) -> None:
+    st.session_state[open_key] = True
+    st.session_state[error_key] = None
+
+
+def _add_goal_to_editor(state_key: str, input_key: str, error_key: str, open_key: str) -> None:
+    new_goal = str(st.session_state.get(input_key) or "").strip()
+    if not new_goal:
+        st.session_state[error_key] = "Enter a goal before adding."
+        return
+
+    goals = _normalize_goal_editor_state(st.session_state.get(state_key, []))
+    if new_goal in goals:
+        st.session_state[error_key] = "That goal is already in the list."
+        return
+
+    goals.append(new_goal)
+    st.session_state[state_key] = goals
+    st.session_state[input_key] = ""
+    st.session_state[open_key] = False
+    st.session_state[error_key] = None
+
+
+def _remove_goal_from_editor(state_key: str, index: int, error_key: str) -> None:
+    goals = _normalize_goal_editor_state(st.session_state.get(state_key, []))
+    if 0 <= index < len(goals):
+        goals.pop(index)
+    st.session_state[state_key] = goals
+    st.session_state[error_key] = None
+
+
 def _clear_edit_profile_choice_widget_state() -> None:
     for suffix in PROFILE_CHOICE_WIDGET_SUFFIXES:
         st.session_state.pop(_profile_choice_widget_key("edit_profile_form", suffix), None)
+    for key in list(st.session_state.keys()):
+        if any(str(key).startswith(prefix) for prefix in EDIT_GOAL_EDITOR_PREFIXES):
+            st.session_state.pop(key, None)
+
+
+def _clear_create_goal_editor_state() -> None:
+    for key in (
+        _goal_editor_key("create_profile_form", "goals_editor"),
+        _goal_editor_key("create_profile_form", "goal_input"),
+        _goal_editor_key("create_profile_form", "goal_add_open"),
+        _goal_editor_key("create_profile_form", "goal_error"),
+    ):
+        st.session_state.pop(key, None)
+
+
+def _render_goals_editor(form_key: str, state_key: str, profile: dict | None = None) -> None:
+    input_key = _goal_editor_key(form_key, "goal_input", profile)
+    open_key = _goal_editor_key(form_key, "goal_add_open", profile)
+    error_key = _goal_editor_key(form_key, "goal_error", profile)
+    goals = _normalize_goal_editor_state(st.session_state.get(state_key, []))
+    st.session_state[state_key] = goals
+
+    st.subheader("Goals")
+    with st.container(border=True):
+        if goals:
+            for index, goal in enumerate(goals):
+                goal_col, remove_col = st.columns((5, 1), vertical_alignment="center")
+                with goal_col:
+                    st.write(goal)
+                with remove_col:
+                    st.form_submit_button(
+                        "−",
+                        key=f"{state_key}_remove_{index}",
+                        on_click=_remove_goal_from_editor,
+                        args=(state_key, index, error_key),
+                        use_container_width=True,
+                    )
+        else:
+            st.write("No goals selected.")
+
+        if st.session_state.get(open_key):
+            input_col, add_col = st.columns((5, 1), vertical_alignment="bottom")
+            with input_col:
+                st.text_input("New Goal", key=input_key)
+            with add_col:
+                st.form_submit_button(
+                    "Add Goal",
+                    key=f"{state_key}_add_goal",
+                    on_click=_add_goal_to_editor,
+                    args=(state_key, input_key, error_key, open_key),
+                    use_container_width=True,
+                )
+        else:
+            _, add_col = st.columns((5, 1))
+            with add_col:
+                st.form_submit_button(
+                    "+",
+                    key=f"{state_key}_show_add_goal",
+                    on_click=_show_goal_input,
+                    args=(open_key, error_key),
+                    use_container_width=True,
+                )
+
+        if st.session_state.get(error_key):
+            st.error(st.session_state[error_key])
 
 
 def _safe_profile_error(action: str, error: Exception) -> str:
@@ -403,7 +539,6 @@ def _render_profile_form(*, mode: str, profile: dict | None = None) -> None:
     is_edit = mode == "edit"
     form_key = "edit_profile_form" if is_edit else "create_profile_form"
     submit_label = "Save changes" if is_edit else "Create profile"
-    selected_goals = _goals_from_profile(profile) if is_edit else []
     gender_options = (
         _single_choice_options_with_current(GENDER_OPTIONS, defaults["gender"])
         if is_edit
@@ -414,10 +549,10 @@ def _render_profile_form(*, mode: str, profile: dict | None = None) -> None:
         if is_edit
         else ACTIVITY_LEVEL_OPTIONS
     )
-    goal_options = (
-        _goal_options_with_existing(GOAL_OPTIONS, selected_goals)
-        if is_edit
-        else GOAL_OPTIONS
+    goals_state_key = _initialize_goal_editor_state(
+        form_key=form_key,
+        is_edit=is_edit,
+        profile=profile,
     )
 
     with st.form(form_key):
@@ -460,13 +595,7 @@ def _render_profile_form(*, mode: str, profile: dict | None = None) -> None:
             key=_profile_choice_widget_key(form_key, "activity_level_choice"),
             placeholder="Choose activity level",
         )
-        st.subheader("Goals")
-        goals = st.multiselect(
-            "Select Your Goals",
-            options=goal_options,
-            default=selected_goals,
-            key=_profile_choice_widget_key(form_key, "goals_multiselect"),
-        )
+        _render_goals_editor(form_key, goals_state_key, profile)
 
         submitted = st.form_submit_button(submit_label, type="primary")
 
@@ -480,7 +609,7 @@ def _render_profile_form(*, mode: str, profile: dict | None = None) -> None:
         "height": float(height),
         "gender": gender,
         "activity_level": activity_level,
-        "goals": list(goals or []),
+        "goals": _normalize_goal_editor_state(st.session_state.get(goals_state_key, [])),
     }
 
     try:
@@ -490,6 +619,7 @@ def _render_profile_form(*, mode: str, profile: dict | None = None) -> None:
             if not profile_id:
                 raise ValueError("No profile selected")
             updated_profile = profiles.save_profile_changes(account_id, profile_id, **profile_payload)
+            _set_goal_editor_state(goals_state_key, updated_profile.get("goals", profile_payload["goals"]))
             st.session_state["selected_profile_id"] = updated_profile.get("_id", profile_id)
             st.session_state["selected_profile"] = updated_profile
             _refresh_profiles(st.session_state["selected_profile_id"])
@@ -499,6 +629,7 @@ def _render_profile_form(*, mode: str, profile: dict | None = None) -> None:
                 account_id=_trusted_account_id(),
                 **profile_payload,
             )
+            _clear_create_goal_editor_state()
             _refresh_profiles(new_profile_id)
             st.session_state["profile_success"] = "Profile created."
         st.session_state["ui_error"] = None

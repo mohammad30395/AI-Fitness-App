@@ -287,3 +287,77 @@ Goals
 
 ### Ready for UI Prompt-04
 - Yes.
+
+## UI Prompt-04 — Dynamic Goals Editor
+
+### Goal editor implementation
+- Replaced the active `st.multiselect("Select Your Goals", ...)` Goals interaction with a native Streamlit editor.
+- Streamlit APIs used: `st.subheader`, `st.container(border=True)`, `st.columns`, `st.write`, `st.text_input`, and callback-capable `st.form_submit_button`.
+- The editor stays inside the existing profile `st.form`; add/remove controls are keyed `st.form_submit_button` callbacks, and only the existing Create/Save submit button reaches the persistence path.
+- Each current goal is rendered as a row with the goal text and a `−` remove control.
+- The add control is rendered as a right-aligned `+` row inside the bordered editor area as closely as native Streamlit layout permits.
+
+### Default new-profile goal
+- `Muscle Gain`.
+- Create-mode goal editor initializes once to `["Muscle Gain"]` only when the create editor state key is absent.
+- If the user removes `Muscle Gain`, the empty list remains in session state and the default is not reinserted on rerun.
+
+### Add behavior
+- Pressing `+` opens an inline `New Goal` text input and `Add Goal` submit control.
+- New goals are arbitrary plain strings.
+- Surrounding whitespace is trimmed for newly entered goals.
+- Blank input is rejected with concise feedback.
+- Exact duplicates already present in the current editor state are rejected.
+- Successful add clears the temporary input, closes the add row, and keeps the updated list in temporary session state.
+
+### Remove behavior
+- Every current goal has a `−` control.
+- Remove keys are index-scoped under the current editor state key instead of using goal text directly.
+- Pressing `−` removes only that goal from temporary session state.
+- Removing the last goal leaves a valid empty list `[]`.
+
+### Existing-profile behavior
+- Existing profiles initialize from their stored goals exactly.
+- Existing empty goal lists initialize empty.
+- `Muscle Gain` is not injected into existing profiles.
+- Legacy/custom goals such as `Build strength` and `Improve endurance` render as normal editable/removable goals.
+
+### Session state
+- Create keys:
+  - `create_profile_form_goals_editor`
+  - `create_profile_form_goal_input`
+  - `create_profile_form_goal_add_open`
+  - `create_profile_form_goal_error`
+- Edit keys are profile-scoped:
+  - `edit_profile_form_goals_editor_<profile_id>`
+  - `edit_profile_form_goal_input_<profile_id>`
+  - `edit_profile_form_goal_add_open_<profile_id>`
+  - `edit_profile_form_goal_error_<profile_id>`
+- Goal editor state is always normalized to `list[str]`.
+- `_set_selected_profile()` clears only edit-mode choice/editor keys so profile switching reinitializes from the newly selected stored profile.
+- Successful create clears create-mode goal editor keys so the next new-profile editor gets the one-time default again.
+- Successful edit synchronizes the edit goal editor state with the saved goals before rerun/refresh.
+
+### Persistence
+- `+` does not persist.
+- `−` does not persist.
+- Create/Save persists the current temporary goal list through the existing `profiles.py` service path.
+- No direct Astra write was introduced in the goal editor.
+
+### Data contract
+- Goals remain `list[str]`.
+- Goals are not JSON-encoded, comma-joined, or newline-joined.
+
+### Tests
+- Focused UI tests: `./.venv/bin/python -m pytest tests/test_profile_ui_options.py tests/test_main_resilience.py` passed with 62 tests.
+- Safe regression suite: `./.venv/bin/python -m pytest tests/test_profile_ui_options.py tests/test_profiles.py tests/test_db.py tests/test_utils_serialization.py tests/test_ai.py tests/test_main_resilience.py` passed with 180 tests.
+- Compile verification: `./.venv/bin/python -m compileall main.py profiles.py db.py ai.py utils.py` passed.
+- Coverage includes one-time new-profile default, removal without reinsertion, existing/empty/legacy profile initialization, add validation, duplicate prevention, multiple custom goals, removing all goals, list-state preservation, add/remove non-persistence, Create/Save persistence boundary, profile switching, save synchronization, and Gender/Activity regression behavior.
+
+### Visual verification
+- Method: source/layout inspection plus mocked Streamlit UI tests.
+- Result: verified Goals heading, bordered editor grouping, goal rows with `−` controls, right-side `+` control, add input flow, empty state, and no active `st.multiselect` in the profile form.
+- Manual browser visual verification: not run because rendering and interacting with the authenticated profile form against the real app would require live Astra-backed login/profile data. No safe local/mock visual mode exists in the repository.
+
+### Ready for UI Prompt-05
+- Yes.
