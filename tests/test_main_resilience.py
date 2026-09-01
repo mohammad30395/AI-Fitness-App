@@ -343,6 +343,26 @@ def test_tooltip_theme_tokens_have_readable_contrast():
         )
 
 
+def test_theme_tokens_cover_light_and_dark_readable_contrast_pairs():
+    text_pairs = (
+        ("text", "background"),
+        ("text", "surface"),
+        ("text_muted", "background"),
+        ("text_muted", "surface"),
+        ("text", "input_background"),
+        ("button_text", "button_background"),
+        ("button_text", "button_hover"),
+        ("text", "surface_alt"),
+        ("text", "input_hover"),
+        ("tooltip_text", "tooltip_background"),
+    )
+
+    for theme in main.UI_THEME_OPTIONS:
+        tokens = main.UI_THEME_TOKENS[theme]
+        for foreground, background in text_pairs:
+            assert _contrast_ratio(tokens[foreground], tokens[background]) >= 4.5
+
+
 def test_ui_theme_defaults_to_light_without_public_runtime_theme_api(monkeypatch):
     fake_st = FakeStreamlit()
     monkeypatch.setattr(main, "st", fake_st)
@@ -1269,11 +1289,64 @@ def test_ui_theme_css_uses_tokens_without_js_or_private_api(monkeypatch):
     assert "[data-testid=\"stAppViewContainer\"]" in css
     assert "[data-testid=\"stRadio\"]" in css
     assert "[data-testid=\"stSelectbox\"]" in css
+    assert "[data-testid=\"stMainBlockContainer\"]" in css
+    assert "padding-top: 4.5rem;" in css
     assert "[role=\"tooltip\"]" in css
+    assert 'button[kind="primaryFormSubmit"]' in css
     assert "<script" not in css.lower()
     assert "st._config" not in css
     assert "st-emotion-cache" not in css
     assert ".css-" not in css
+
+
+def test_ui_theme_css_header_safe_zone_uses_scoped_static_layout(monkeypatch):
+    fake_st = FakeStreamlit()
+    fake_st.session_state[main.UI_THEME_SESSION_KEY] = "light"
+    monkeypatch.setattr(main, "st", fake_st)
+
+    main._apply_ui_theme()
+
+    css = fake_st.markdown_calls[0][0][0]
+    assert "[data-testid=\"stMainBlockContainer\"]" in css
+    assert "padding-top: 4.5rem;" in css
+    forbidden_fragments = (
+        "position: fixed",
+        "position: absolute",
+        "transform: translate",
+        "display: none",
+        "visibility: hidden",
+        "st-emotion-cache",
+        ".css-",
+    )
+    for fragment in forbidden_fragments:
+        assert fragment not in css
+
+
+def test_ui_theme_css_primary_buttons_keep_high_contrast_foreground(monkeypatch):
+    fake_st = FakeStreamlit()
+    fake_st.session_state[main.UI_THEME_SESSION_KEY] = "light"
+    monkeypatch.setattr(main, "st", fake_st)
+
+    main._apply_ui_theme()
+
+    css = fake_st.markdown_calls[0][0][0]
+    assert "[data-testid=\"stButton\"] button[kind=\"primary\"]" in css
+    assert "[data-testid=\"stFormSubmitButton\"] button[kind=\"primaryFormSubmit\"]" in css
+    assert "color: var(--fit-button-text);" in css
+    assert (
+        _contrast_ratio(
+            main.UI_THEME_TOKENS["light"]["button_text"],
+            main.UI_THEME_TOKENS["light"]["button_background"],
+        )
+        >= 4.5
+    )
+    assert (
+        _contrast_ratio(
+            main.UI_THEME_TOKENS["light"]["button_text"],
+            main.UI_THEME_TOKENS["light"]["button_hover"],
+        )
+        >= 4.5
+    )
 
 
 def test_ui_theme_css_keeps_tooltip_text_from_global_span_leak(monkeypatch):
@@ -1286,7 +1359,7 @@ def test_ui_theme_css_keeps_tooltip_text_from_global_span_leak(monkeypatch):
     css = fake_st.markdown_calls[0][0][0]
     assert "label,\np,\nspan" not in css
     assert not any(
-        line.strip() in {"label,", "p,", "span {"}
+        line.strip() in {"label,", "p,", "span {", "div {"}
         for line in css.splitlines()
     )
     assert "[role=\"tooltip\"] *" in css

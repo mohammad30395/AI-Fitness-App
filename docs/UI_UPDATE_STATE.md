@@ -1236,3 +1236,71 @@ GENERAL
 - Authenticated visual browser checks remain manual because browser automation was unavailable in this Codex session and no authenticated user session was provided.
 - Live AI success depends on Langflow/OpenRouter provider account state.
 - OpenRouter provider HTTP 402 remains an external provider/account/token-budget limitation if it still occurs.
+
+## FIX Prompt-14 — Light Contrast and Header Safe-Zone
+
+### Manual defects observed
+- The app-owned Theme, Create Profile, and Logout action row rendered too close to Streamlit's platform chrome in both themes.
+- Light mode had reported weak readability on some foreground/background combinations, especially strongly colored primary actions such as Generate with AI.
+
+### Header clipping root cause
+- `_apply_ui_theme()` set `[data-testid="stMainBlockContainer"] { padding-top: 1.5rem; }`.
+- That centralized rule reduced the normal top safe area enough for the first app row to sit under or too near Streamlit's fixed upper chrome.
+
+### Header safe-zone strategy
+- Restored a modest rem-based safe zone by increasing the main block top padding to `4.5rem`.
+- This moves the entire app-owned first row lower without placing anything into or over the Streamlit platform toolbar.
+- No large spacer, fixed overlay, absolute overlay, transform, or JavaScript positioning was added.
+
+### Header selector / scope
+- Selector used: `[data-testid="stMainBlockContainer"]`.
+- This is the existing stable Streamlit main content container already used by the app theme CSS.
+- No generated `.css-*` or `st-emotion-cache-*` selector is used.
+
+### Streamlit chrome preservation
+- Streamlit Share/menu/toolbar chrome remains untouched.
+- No `display: none`, `visibility: hidden`, opacity-hiding, fixed positioning, or absolute positioning is used against Streamlit chrome.
+
+### Light-mode contrast audit
+- Audited light tokens for text/background, text/surface, muted/background, muted/surface, input text/input background, button text/primary background, button text/primary hover, secondary text/surface-alt, secondary text/input-hover, and tooltip text/background.
+- All audited normal text pairs meet or exceed the 4.5:1 test target.
+- Border tokens remain subtle by design and are not used as normal foreground text.
+
+### Tokens changed
+- No token values were changed.
+- The declared light `button_text` value already provides high contrast against `button_background` and `button_hover`.
+
+### Primary button foreground fix
+- Primary styling now covers Streamlit form-submit primary buttons with `button[kind="primaryFormSubmit"]` in addition to normal `button[kind="primary"]`.
+- This keeps strongly colored primary actions on `--fit-button-background` / `--fit-button-hover` with `--fit-button-text`.
+
+### Muted/text/input contrast
+- Light text, muted text, and input text/background pairs are covered by contrast tests.
+- Input, selectbox, radio, caption, profile summary, section, and button text scopes remain centralized and narrow.
+
+### Dark-mode regression result
+- The same contrast test set runs for dark mode.
+- Dark mode text, muted text, inputs, primary buttons, secondary buttons, and tooltip contrast remain readable by the test contract.
+
+### Tooltip regression result
+- The FIX Prompt-12 `[role="tooltip"]` strategy remains intact.
+- Tooltip text/background contrast remains covered for both themes.
+- Broad `label, p, span` color leakage was not reintroduced.
+
+### Functional behavior preserved
+- Header action order remains Theme -> Create Profile -> Logout.
+- Profile view/edit/create semantics are unchanged.
+- Goals behavior and temporary-state semantics are unchanged.
+- Nutrition, Notes, Ask AI, AI error handling, Langflow flow JSON, Astra, backend modules, and requirements are unchanged.
+
+### Tests
+- Added/updated tests for broad light/dark contrast pairs.
+- Added/updated tests for the header safe-zone CSS contract.
+- Added/updated tests for primary form-submit button foreground coverage.
+- Existing header order, profile flow, Goals, tooltip, theme state, and AI regression tests remain active.
+
+### Manual browser verification
+- manual authenticated Light/Dark verification: NOT RUN — requires user browser sign-off
+
+### Ready for final manual sign-off
+- yes, pending user visual recheck in an authenticated browser session.

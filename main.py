@@ -239,7 +239,7 @@ def _apply_ui_theme() -> None:
 }}
 
 [data-testid="stMainBlockContainer"] {{
-    padding-top: 1.5rem;
+    padding-top: 4.5rem;
 }}
 
 [data-testid="stMarkdownContainer"],
@@ -366,14 +366,16 @@ div[data-baseweb="select"]:focus-within > div {{
 }}
 
 [data-testid="stButton"] button[kind="primary"],
-[data-testid="stFormSubmitButton"] button[kind="primary"] {{
+[data-testid="stFormSubmitButton"] button[kind="primary"],
+[data-testid="stFormSubmitButton"] button[kind="primaryFormSubmit"] {{
     background-color: var(--fit-button-background);
     color: var(--fit-button-text);
     border-color: var(--fit-button-background);
 }}
 
 [data-testid="stButton"] button[kind="primary"]:hover,
-[data-testid="stFormSubmitButton"] button[kind="primary"]:hover {{
+[data-testid="stFormSubmitButton"] button[kind="primary"]:hover,
+[data-testid="stFormSubmitButton"] button[kind="primaryFormSubmit"]:hover {{
     background-color: var(--fit-button-hover);
     border-color: var(--fit-button-hover);
     color: var(--fit-button-text);
