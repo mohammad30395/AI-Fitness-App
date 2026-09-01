@@ -991,3 +991,48 @@ GENERAL
 
 ### Ready for FIX Prompt-12
 - yes, if final Prompt-11 verification remains green.
+
+## FIX Prompt-12 — Goal Tooltip Readability
+
+### Defect
+- Hovering the Goal remove control rendered Streamlit's native tooltip with unreadable contrast after the app theme CSS was applied.
+- The same risk applied to Goal add controls because they also use Streamlit native `help`.
+
+### Root cause
+- The runtime theme CSS included broad global text selectors for `label`, `p`, and `span`.
+- Those selectors could affect Streamlit tooltip portal content outside the intended app content area.
+
+### Fix
+- Removed the broad global text selector leak and scoped text color rules to Streamlit content containers.
+- Added explicit light/dark tooltip tokens: `tooltip_background`, `tooltip_text`, and `tooltip_border`.
+- Styled only the verified native tooltip role selector, `[role="tooltip"]`, and its descendants.
+- Kept Goal `+`, `Add Goal`, and `−` tooltips on Streamlit native `help` strings.
+
+### Theme behavior
+- Light and dark themes define the same tooltip token names.
+- Tooltip text/background contrast is tested at WCAG 4.5:1 or higher in both themes.
+- Theme toggles still preserve dynamic Goal editor state.
+
+### Safety
+- No generated Streamlit class selectors were added.
+- No JavaScript, `components.html`, or unsafe custom tooltip HTML was added.
+- No profile IDs, account IDs, session keys, database IDs, or widget keys are exposed in Goal tooltip copy.
+
+### Preserved behavior
+- Goal add/remove callbacks and ordering are unchanged.
+- Goal changes remain session-local until Profile Save/Create submit.
+- View mode still renders no Goal editor controls.
+- Create and edit modes still render the dynamic Goal editor.
+- Header order and Prompt-09 AI error classification are unchanged.
+
+### Tests
+- Added/updated tests for tooltip token contract and contrast.
+- Added/updated tests for CSS selector safety and removal of global `label, p, span` leakage.
+- Added/updated tests for native public help strings on Goal `+`, `Add Goal`, and `−`, including long/special-character goal text.
+- Existing regression tests continue to cover Goal add/remove behavior, non-persistence, list typing, view/edit/create profile flow, header order, theme state preservation, and ProviderQuotaError handling.
+
+### Manual verification
+- manual authenticated tooltip verification: NOT RUN — requires user browser sign-off
+
+### Ready for FIX Prompt-13
+- not started.

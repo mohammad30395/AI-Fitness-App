@@ -68,6 +68,9 @@ UI_THEME_TOKEN_NAMES = (
     "button_text",
     "danger",
     "danger_hover",
+    "tooltip_background",
+    "tooltip_text",
+    "tooltip_border",
     "focus_ring",
     "shadow",
     "success",
@@ -92,6 +95,9 @@ UI_THEME_TOKENS = {
         "button_text": "#ffffff",
         "danger": "#b42318",
         "danger_hover": "#fee4e2",
+        "tooltip_background": "#111827",
+        "tooltip_text": "#f9fafb",
+        "tooltip_border": "#374151",
         "focus_ring": "rgba(37, 99, 235, 0.28)",
         "shadow": "0 10px 28px rgba(23, 32, 51, 0.08)",
         "success": "#047857",
@@ -115,6 +121,9 @@ UI_THEME_TOKENS = {
         "button_text": "#0b1220",
         "danger": "#fb7185",
         "danger_hover": "#3b1823",
+        "tooltip_background": "#f9fafb",
+        "tooltip_text": "#111827",
+        "tooltip_border": "#d1d5db",
         "focus_ring": "rgba(96, 165, 250, 0.35)",
         "shadow": "0 10px 28px rgba(0, 0, 0, 0.24)",
         "success": "#34d399",
@@ -234,17 +243,31 @@ def _apply_ui_theme() -> None:
 }}
 
 [data-testid="stMarkdownContainer"],
+[data-testid="stMarkdownContainer"] p,
+[data-testid="stMarkdownContainer"] span,
 [data-testid="stCaptionContainer"],
+[data-testid="stCaptionContainer"] p,
+[data-testid="stCaptionContainer"] span,
 [data-testid="stText"],
-label,
-p,
-span {{
+[data-testid="stText"] p,
+[data-testid="stText"] span {{
     color: var(--fit-text);
 }}
 
 [data-testid="stCaptionContainer"],
 [data-testid="stMarkdownContainer"] small {{
     color: var(--fit-text-muted);
+}}
+
+[role="tooltip"] {{
+    background-color: var(--fit-tooltip-background);
+    border: 1px solid var(--fit-tooltip-border);
+    box-shadow: var(--fit-shadow);
+    color: var(--fit-tooltip-text);
+}}
+
+[role="tooltip"] * {{
+    color: var(--fit-tooltip-text);
 }}
 
 [data-testid="stForm"],

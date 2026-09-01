@@ -228,6 +228,28 @@ def seed_authenticated_session(fake_st, account_id="account-a", username="UserA"
     )
 
 
+def _hex_to_srgb(hex_color):
+    value = hex_color.lstrip("#")
+    return tuple(int(value[index : index + 2], 16) / 255 for index in (0, 2, 4))
+
+
+def _relative_luminance(hex_color):
+    channels = []
+    for channel in _hex_to_srgb(hex_color):
+        if channel <= 0.03928:
+            channels.append(channel / 12.92)
+        else:
+            channels.append(((channel + 0.055) / 1.055) ** 2.4)
+    red, green, blue = channels
+    return 0.2126 * red + 0.7152 * green + 0.0722 * blue
+
+
+def _contrast_ratio(first, second):
+    lighter = max(_relative_luminance(first), _relative_luminance(second))
+    darker = min(_relative_luminance(first), _relative_luminance(second))
+    return (lighter + 0.05) / (darker + 0.05)
+
+
 def test_auth_session_defaults_initialize_fresh_state(monkeypatch):
     fake_st = FakeStreamlit()
     monkeypatch.setattr(main, "st", fake_st)
@@ -295,6 +317,9 @@ def test_ui_theme_token_sets_share_required_visual_contract():
         "button_text",
         "danger",
         "danger_hover",
+        "tooltip_background",
+        "tooltip_text",
+        "tooltip_border",
         "focus_ring",
         "shadow",
         "success",
@@ -309,6 +334,13 @@ def test_light_and_dark_theme_tokens_are_visually_distinct():
     assert main.UI_THEME_TOKENS["light"]["background"] != main.UI_THEME_TOKENS["dark"]["background"]
     assert main.UI_THEME_TOKENS["light"]["surface"] != main.UI_THEME_TOKENS["dark"]["surface"]
     assert main.UI_THEME_TOKENS["light"]["text"] != main.UI_THEME_TOKENS["dark"]["text"]
+
+
+def test_tooltip_theme_tokens_have_readable_contrast():
+    for tokens in main.UI_THEME_TOKENS.values():
+        assert (
+            _contrast_ratio(tokens["tooltip_background"], tokens["tooltip_text"]) >= 4.5
+        )
 
 
 def test_ui_theme_defaults_to_light_without_public_runtime_theme_api(monkeypatch):
@@ -1230,13 +1262,49 @@ def test_ui_theme_css_uses_tokens_without_js_or_private_api(monkeypatch):
     assert "--fit-background: #111827;" in css
     assert "--fit-focus-ring:" in css
     assert "--fit-shadow:" in css
+    assert "--fit-tooltip-background:" in css
+    assert "--fit-tooltip-text:" in css
+    assert "--fit-tooltip-border:" in css
     assert "[data-testid=\"stAppViewContainer\"]" in css
     assert "[data-testid=\"stRadio\"]" in css
     assert "[data-testid=\"stSelectbox\"]" in css
+    assert "[role=\"tooltip\"]" in css
     assert "<script" not in css.lower()
     assert "st._config" not in css
     assert "st-emotion-cache" not in css
     assert ".css-" not in css
+
+
+def test_ui_theme_css_keeps_tooltip_text_from_global_span_leak(monkeypatch):
+    fake_st = FakeStreamlit()
+    fake_st.session_state[main.UI_THEME_SESSION_KEY] = "light"
+    monkeypatch.setattr(main, "st", fake_st)
+
+    main._apply_ui_theme()
+
+    css = fake_st.markdown_calls[0][0][0]
+    assert "label,\np,\nspan" not in css
+    assert not any(
+        line.strip() in {"label,", "p,", "span {"}
+        for line in css.splitlines()
+    )
+    assert "[role=\"tooltip\"] *" in css
+    assert "color: var(--fit-tooltip-text);" in css
+    assert "background-color: var(--fit-tooltip-background);" in css
+
+
+def test_goal_tooltip_source_uses_native_help_without_custom_markup():
+    source = Path("main.py").read_text()
+
+    assert 'help=f"Remove {goal}"' in source
+    assert 'help="Add goal"' in source
+    assert 'help="Confirm new goal"' in source
+    assert "components.html" not in source
+    assert "<script" not in source.lower()
+    assert "javascript:" not in source.lower()
+    assert "data-baseweb=\"tooltip\"" not in source
+    assert "st-emotion-cache" not in source
+    assert ".css-" not in source
 
 
 def test_main_source_avoids_private_theme_api_and_javascript():
@@ -2052,6 +2120,59 @@ def test_long_special_and_twenty_goal_state_remains_ordered_list(monkeypatch):
         unusual_goals[3],
         *[f"Goal {number:02d}" for number in range(1, 21)],
     ]
+
+
+def test_goal_editor_help_strings_are_public_native_help_text(monkeypatch):
+    fake_st = FakeStreamlit()
+    long_goal = (
+        "Improve ankle & hip mobility <daily> while tracking RPE / recovery "
+        "for every controlled repetition"
+    )
+    state_key = "create_profile_form_goals_editor"
+    fake_st.session_state[state_key] = [long_goal]
+    monkeypatch.setattr(main, "st", fake_st)
+
+    main._render_goals_editor("create_profile_form", state_key)
+
+    help_texts = [
+        kwargs.get("help")
+        for _label, kwargs in fake_st.form_submit_calls
+        if kwargs.get("help")
+    ]
+    assert f"Remove {long_goal}" in help_texts
+    assert "Add goal" in help_texts
+
+    private_fragments = (
+        "_id",
+        "account_id",
+        "auth_session_id",
+        "session_state",
+        "create_profile_form",
+        "goals_editor",
+        "goal_input",
+        "remove_0",
+    )
+    for help_text in help_texts:
+        for fragment in private_fragments:
+            assert fragment not in help_text
+
+
+def test_goal_editor_open_add_button_help_is_public_native_help_text(monkeypatch):
+    fake_st = FakeStreamlit()
+    state_key = "create_profile_form_goals_editor"
+    fake_st.session_state[state_key] = ["Muscle Gain"]
+    fake_st.session_state["create_profile_form_goal_add_open"] = True
+    monkeypatch.setattr(main, "st", fake_st)
+
+    main._render_goals_editor("create_profile_form", state_key)
+
+    add_goal_calls = [
+        kwargs
+        for label, kwargs in fake_st.form_submit_calls
+        if label == "Add Goal"
+    ]
+    assert add_goal_calls
+    assert add_goal_calls[0]["help"] == "Confirm new goal"
 
 
 def test_goal_editor_actions_do_not_call_profile_persistence(monkeypatch):
