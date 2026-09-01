@@ -919,3 +919,75 @@ GENERAL
 
 ### Ready for FIX Prompt-11
 - yes, if final Prompt-10 verification remains green.
+
+## FIX Prompt-11 — Selected Profile View/Edit Workflow
+
+### Previous profile workflow
+- After FIX Prompt-10, the global header contained Theme -> Create Profile -> Logout.
+- The Profile section still rendered the selected profile edit form immediately after selection.
+- Existing selected profiles therefore opened directly into editable inputs instead of a read-only summary.
+
+### New mode contract
+- `view`: selected profile is displayed as a read-only summary, or a no-profile message is shown.
+- `edit`: selected profile edit form is displayed after the contextual Edit Profile action.
+- `create`: new profile form is displayed after the header Create Profile action.
+- Invalid or missing mode normalizes to `view`.
+
+### Selected profile summary
+- Fields: Name, Age, Weight, Height, Gender, Activity Level, Goals.
+- Layout: read-only native Streamlit summary below the Active profile selector.
+- Goals behavior: saved goals are displayed in stored order without normalization/mapping; empty existing goals show `No goals added.` and do not inject `Muscle Gain`.
+- The summary uses the current `selected_profile` data rather than a second independent profile-summary data structure.
+
+### Internal profile ID presentation
+- The internal profile ID remains in session/profile data for selection, Notes, Ask AI, and ownership/RAG isolation.
+- The ID is not editable and is no longer prominently displayed in the normal selected-profile summary.
+
+### Edit Profile behavior
+- The contextual Edit Profile button sets `profile_ui_mode` to `edit`.
+- Clicking Edit Profile does not persist, does not change the selected profile, and clears stale edit-form state before the form is initialized from the selected stored profile.
+- Gender remains `st.radio`, Activity Level remains `st.selectbox`, and Goals remain the dynamic add/remove editor.
+- Legacy gender, activity, and custom goal values remain representable.
+
+### Save behavior
+- Save Changes remains the explicit edit persistence boundary.
+- Successful saves use `profiles.save_profile_changes(...)`, refresh the selected profile, set `profile_ui_mode` to `view`, and preserve the current theme.
+- No direct `db.py` write path was added in `main.py`.
+
+### Cancel behavior
+- Edit mode includes a secondary Cancel action beside Save Changes.
+- Cancel exits to `view`, clears temporary edit form/goal state, preserves the selected stored profile and theme, and performs no persistence.
+- Re-entering edit mode initializes from the stored selected profile again.
+
+### Profile-switch behavior
+- Selecting a different profile uses the existing profile service read path and sets `profile_ui_mode` to `view`.
+- Stale edit-specific widget and goal state is cleared during selection changes.
+- Unsaved edits from one profile are not saved and do not leak into another profile.
+
+### Create-mode integration
+- Header Create Profile still enters `create`.
+- Create mode still uses the existing create profile form and service path.
+- New-profile default goals remain `["Muscle Gain"]` once per create editor state.
+- Back to selected profile and successful create both return to `view`.
+
+### Theme integration
+- Theme implementation and header order were not changed for FIX Prompt-11.
+- Theme toggles preserve `view`, `edit`, or `create` mode and temporary edit/create goal state.
+
+### Persistence boundaries
+- Selecting a profile reads the selected profile but does not save profile edits.
+- Edit Profile only changes UI mode.
+- Temporary edit changes remain session/form state.
+- Cancel discards temporary edit state without saving.
+- Save Changes persists through `profiles.py`.
+- Header Create Profile only changes UI mode until the create form is submitted.
+
+### Tests
+- Added/updated tests for view-mode default, read-only summary fields, hidden edit controls in view mode, empty goal summary, profile ID presentation, Edit Profile mode entry, edit initialization with legacy values, edit Save/Cancel buttons, theme preservation, cancel restore behavior, profile switching from edit, create/header regressions, logout/header regressions, and Prompt-09 AI regression.
+
+### Manual verification
+- Automated startup check is required for Prompt-11.
+- Authenticated visual profile verification may require user browser sign-off if credentials/session automation is not available.
+
+### Ready for FIX Prompt-12
+- yes, if final Prompt-11 verification remains green.

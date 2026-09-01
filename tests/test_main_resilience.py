@@ -66,6 +66,7 @@ class FakeStreamlit:
         self.error_messages = []
         self.caption_messages = []
         self.markdown_calls = []
+        self.write_calls = []
         self.page_config = None
         self.input_values = {}
         self.text_input_calls = []
@@ -201,6 +202,7 @@ class FakeStreamlit:
         return None
 
     def write(self, *args, **kwargs):
+        self.write_calls.append((args, kwargs))
         return None
 
     def markdown(self, *args, **kwargs):
@@ -731,11 +733,471 @@ def test_normal_profile_section_removes_create_profile_tab_as_primary_entry(monk
 
     assert ("Create profile", "Edit selected") not in fake_st.tab_labels
     assert not any("Create profile" in labels for labels in fake_st.tab_labels)
-    assert fake_st.radio_calls[0][0] == "Gender"
-    assert fake_st.selectbox_calls[1][0] == "Activity Level"
+    assert fake_st.radio_calls == []
+    assert [call[0] for call in fake_st.selectbox_calls] == ["Active profile"]
     submit_labels = [label for label, _kwargs in fake_st.form_submit_calls]
-    assert "Save changes" in submit_labels
+    assert "Save Changes" not in submit_labels
     assert "Create profile" not in submit_labels
+    assert ("button", "Edit Profile") in fake_st.events
+
+
+def test_selected_profile_defaults_to_view_summary_without_edit_controls(monkeypatch):
+    fake_st = FakeStreamlit()
+    fake_st.private_ui_allowed = True
+    selected_profile = {
+        "_id": "profile-internal-secret",
+        "name": "Jacob",
+        "age": 30,
+        "weight": 70,
+        "height": 170,
+        "gender": "Male",
+        "activity_level": "Moderately Active",
+        "goals": ["Wake up early", "Improve mobility"],
+    }
+    seed_authenticated_session(fake_st)
+    fake_st.session_state.update(
+        {
+            "profiles": [selected_profile],
+            "selected_profile_id": "profile-internal-secret",
+            "selected_profile": selected_profile,
+        }
+    )
+    monkeypatch.setattr(main, "st", fake_st)
+
+    main.render_profile_section()
+
+    assert fake_st.session_state[main.PROFILE_UI_MODE_SESSION_KEY] == main.PROFILE_UI_MODE_VIEW
+    assert fake_st.subheader_calls[0][0] == ("Jacob",)
+    captions = fake_st.caption_messages
+    assert "Age" in captions
+    assert "Weight" in captions
+    assert "Height" in captions
+    assert "Gender" in captions
+    assert "Activity Level" in captions
+    assert "Goals" in captions
+    visible_values = [args[0] for args, _kwargs in fake_st.write_calls]
+    assert "30" in [str(value) for value in visible_values]
+    assert "70 kg" in visible_values
+    assert "170 cm" in visible_values
+    assert "Male" in visible_values
+    assert "Moderately Active" in visible_values
+    assert "- Wake up early" in visible_values
+    assert "- Improve mobility" in visible_values
+    assert fake_st.radio_calls == []
+    assert [call[0] for call in fake_st.selectbox_calls] == ["Active profile"]
+    assert fake_st.form_submit_calls == []
+    assert ("button", "Edit Profile") in fake_st.events
+    visible_text = " ".join(
+        [*fake_st.caption_messages, *[str(value) for value in visible_values]]
+    )
+    assert "profile-internal-secret" not in visible_text
+
+
+def test_selected_profile_view_empty_goals_stays_empty(monkeypatch):
+    fake_st = FakeStreamlit()
+    fake_st.private_ui_allowed = True
+    selected_profile = {
+        "_id": "profile-empty",
+        "name": "Empty Goals",
+        "age": 35,
+        "weight": 75,
+        "height": 171,
+        "gender": "Other",
+        "activity_level": "Lightly Active",
+        "goals": [],
+    }
+    seed_authenticated_session(fake_st)
+    fake_st.session_state.update(
+        {
+            main.PROFILE_UI_MODE_SESSION_KEY: main.PROFILE_UI_MODE_VIEW,
+            "profiles": [selected_profile],
+            "selected_profile_id": "profile-empty",
+            "selected_profile": selected_profile,
+        }
+    )
+    monkeypatch.setattr(main, "st", fake_st)
+
+    main.render_profile_section()
+
+    assert "No goals added." in fake_st.caption_messages
+    assert "Muscle Gain" not in " ".join(fake_st.caption_messages)
+    assert not any(label in {"+", "−"} for label, _kwargs in fake_st.form_submit_calls)
+
+
+def test_no_profile_view_guides_to_header_create_without_opening_edit(monkeypatch):
+    fake_st = FakeStreamlit()
+    fake_st.private_ui_allowed = True
+    seed_authenticated_session(fake_st)
+    fake_st.session_state.update(
+        {
+            main.PROFILE_UI_MODE_SESSION_KEY: main.PROFILE_UI_MODE_VIEW,
+            "profiles": [],
+            "selected_profile_id": None,
+            "selected_profile": None,
+        }
+    )
+    monkeypatch.setattr(main, "st", fake_st)
+    monkeypatch.setattr(main, "_refresh_profiles", lambda select_profile_id=None: True)
+
+    main.render_profile_section()
+
+    assert fake_st.session_state[main.PROFILE_UI_MODE_SESSION_KEY] == main.PROFILE_UI_MODE_VIEW
+    assert any("Create Profile in the top action row" in message for message in fake_st.info_messages)
+    assert fake_st.radio_calls == []
+    assert fake_st.form_submit_calls == []
+
+
+def test_edit_profile_button_enters_edit_mode_without_persistence(monkeypatch):
+    fake_st = FakeStreamlit()
+    fake_st.private_ui_allowed = True
+    selected_profile = {"_id": "profile-a", "name": "A", "goals": ["Fat Loss"]}
+    seed_authenticated_session(fake_st)
+    fake_st.session_state.update(
+        {
+            main.PROFILE_UI_MODE_SESSION_KEY: main.PROFILE_UI_MODE_VIEW,
+            "profiles": [selected_profile],
+            "selected_profile_id": "profile-a",
+            "selected_profile": selected_profile,
+            "edit_profile_form_name": "stale",
+            "edit_profile_form_goals_editor_profile-a": ["stale goal"],
+        }
+    )
+    fake_st.button_values["edit_profile_action"] = True
+    monkeypatch.setattr(main, "st", fake_st)
+
+    def fail_persistence(*args, **kwargs):
+        raise AssertionError("Edit Profile click must not persist")
+
+    monkeypatch.setattr(main.profiles, "save_profile_changes", fail_persistence)
+    monkeypatch.setattr(main.db, "update_personal_information", fail_persistence)
+
+    main.render_profile_section()
+
+    assert fake_st.session_state[main.PROFILE_UI_MODE_SESSION_KEY] == main.PROFILE_UI_MODE_EDIT
+    assert fake_st.session_state["selected_profile"] == selected_profile
+    assert "edit_profile_form_name" not in fake_st.session_state
+    assert "edit_profile_form_goals_editor_profile-a" not in fake_st.session_state
+
+
+def test_edit_mode_initializes_current_profile_values_and_legacy_options(monkeypatch):
+    fake_st = FakeStreamlit()
+    fake_st.private_ui_allowed = True
+    selected_profile = {
+        "_id": "profile-legacy",
+        "name": "Legacy Profile",
+        "age": 40,
+        "weight": 80,
+        "height": 175,
+        "gender": "unspecified",
+        "activity_level": "moderate",
+        "goals": ["Build strength", "Improve endurance"],
+    }
+    seed_authenticated_session(fake_st)
+    fake_st.session_state.update(
+        {
+            main.PROFILE_UI_MODE_SESSION_KEY: main.PROFILE_UI_MODE_EDIT,
+            "profiles": [selected_profile],
+            "selected_profile_id": "profile-legacy",
+            "selected_profile": selected_profile,
+        }
+    )
+    monkeypatch.setattr(main, "st", fake_st)
+
+    main.render_profile_section()
+
+    assert fake_st.subheader_calls[0][0] == ("Edit Profile",)
+    assert fake_st.text_input_calls[0] == (
+        "Name",
+        {"value": "Legacy Profile", "key": "edit_profile_form_name"},
+    )
+    assert fake_st.radio_calls[0][0] == "Gender"
+    assert fake_st.radio_calls[0][1]["options"][0] == "unspecified"
+    assert fake_st.selectbox_calls[1][0] == "Activity Level"
+    assert fake_st.selectbox_calls[1][1]["options"][0] == "moderate"
+    assert fake_st.session_state["edit_profile_form_goals_editor_profile-legacy"] == [
+        "Build strength",
+        "Improve endurance",
+    ]
+    submit_labels = [label for label, _kwargs in fake_st.form_submit_calls]
+    assert "Save Changes" in submit_labels
+    assert "Cancel" in submit_labels
+    submit_kwargs = dict(fake_st.form_submit_calls)
+    assert submit_kwargs["Save Changes"]["type"] == "primary"
+    assert submit_kwargs["Cancel"]["type"] == "secondary"
+
+
+def test_theme_toggle_preserves_edit_mode_and_unsaved_edit_goals(monkeypatch):
+    fake_st = FakeStreamlit()
+    state_key = "edit_profile_form_goals_editor_profile-a"
+    fake_st.session_state.update(
+        {
+            main.PROFILE_UI_MODE_SESSION_KEY: main.PROFILE_UI_MODE_EDIT,
+            main.UI_THEME_SESSION_KEY: "light",
+            "selected_profile_id": "profile-a",
+            "selected_profile": {"_id": "profile-a", "goals": ["Fat Loss"]},
+            state_key: ["Improve mobility"],
+        }
+    )
+    monkeypatch.setattr(main, "st", fake_st)
+
+    main._toggle_ui_theme()
+    main._toggle_ui_theme()
+
+    assert fake_st.session_state[main.UI_THEME_SESSION_KEY] == "light"
+    assert fake_st.session_state[main.PROFILE_UI_MODE_SESSION_KEY] == main.PROFILE_UI_MODE_EDIT
+    assert fake_st.session_state[state_key] == ["Improve mobility"]
+
+
+def test_cancel_edit_discards_temporary_values_and_restores_stored_goals(monkeypatch):
+    fake_st = FakeStreamlit()
+    fake_st.private_ui_allowed = True
+    selected_profile = {
+        "_id": "profile-a",
+        "name": "Stored Name",
+        "age": 30,
+        "weight": 70,
+        "height": 170,
+        "gender": "Male",
+        "activity_level": "Sedentary",
+        "goals": ["Fat Loss"],
+    }
+    seed_authenticated_session(fake_st)
+    fake_st.session_state.update(
+        {
+            main.PROFILE_UI_MODE_SESSION_KEY: main.PROFILE_UI_MODE_EDIT,
+            main.UI_THEME_SESSION_KEY: "dark",
+            "selected_profile_id": "profile-a",
+            "selected_profile": selected_profile,
+            "edit_profile_form_name": "Unsaved Name",
+            "edit_profile_form_age": 31,
+            "edit_profile_form_goals_editor_profile-a": ["Improve mobility"],
+        }
+    )
+    fake_st.form_submit_values["edit_profile_form_cancel"] = True
+    monkeypatch.setattr(main, "st", fake_st)
+
+    def fail_persistence(*args, **kwargs):
+        raise AssertionError("cancel edit must not persist")
+
+    monkeypatch.setattr(main.profiles, "save_profile_changes", fail_persistence)
+    monkeypatch.setattr(main.db, "update_personal_information", fail_persistence)
+
+    try:
+        main._render_profile_form(mode="edit", profile=selected_profile)
+    except RerunCalled:
+        pass
+    else:
+        raise AssertionError("cancel edit should rerun")
+
+    assert fake_st.session_state[main.PROFILE_UI_MODE_SESSION_KEY] == main.PROFILE_UI_MODE_VIEW
+    assert fake_st.session_state[main.UI_THEME_SESSION_KEY] == "dark"
+    assert fake_st.session_state["selected_profile"] == selected_profile
+    assert "edit_profile_form_name" not in fake_st.session_state
+    assert "edit_profile_form_age" not in fake_st.session_state
+    assert "edit_profile_form_goals_editor_profile-a" not in fake_st.session_state
+
+    fake_st.form_submit_values["edit_profile_form_cancel"] = False
+    main._enter_edit_profile_mode()
+    main._render_profile_form(mode="edit", profile=selected_profile)
+    assert fake_st.session_state["edit_profile_form_goals_editor_profile-a"] == ["Fat Loss"]
+
+
+def test_profile_switch_while_editing_returns_to_view_and_discards_stale_state(monkeypatch):
+    fake_st = FakeStreamlit()
+    fake_st.private_ui_allowed = True
+    profile_a = {"_id": "profile-a", "name": "A", "goals": ["Fat Loss"]}
+    profile_b = {
+        "_id": "profile-b",
+        "name": "B",
+        "age": 33,
+        "weight": 73,
+        "height": 177,
+        "gender": "Female",
+        "activity_level": "Very Active",
+        "goals": ["Stay Active"],
+    }
+    seed_authenticated_session(fake_st, account_id="account-a")
+    fake_st.session_state.update(
+        {
+            main.PROFILE_UI_MODE_SESSION_KEY: main.PROFILE_UI_MODE_EDIT,
+            "profiles": [profile_a, profile_b],
+            "selected_profile_id": "profile-a",
+            "selected_profile": profile_a,
+            "edit_profile_form_name": "Unsaved A",
+            "edit_profile_form_goals_editor_profile-a": ["Unsaved A goal"],
+        }
+    )
+    fake_st.input_values["Active profile"] = "profile-b"
+    monkeypatch.setattr(main, "st", fake_st)
+    calls = []
+
+    def fake_get_profile_by_id(account_id, profile_id):
+        calls.append((account_id, profile_id))
+        return profile_b
+
+    def fail_persistence(*args, **kwargs):
+        raise AssertionError("profile switch must not persist unsaved edits")
+
+    monkeypatch.setattr(main.profiles, "get_profile_by_id", fake_get_profile_by_id)
+    monkeypatch.setattr(main.profiles, "save_profile_changes", fail_persistence)
+    monkeypatch.setattr(main.db, "update_personal_information", fail_persistence)
+
+    try:
+        main.render_profile_section()
+    except RerunCalled:
+        pass
+    else:
+        raise AssertionError("profile switch should rerun")
+
+    assert calls == [("account-a", "profile-b")]
+    assert fake_st.session_state[main.PROFILE_UI_MODE_SESSION_KEY] == main.PROFILE_UI_MODE_VIEW
+    assert fake_st.session_state["selected_profile_id"] == "profile-b"
+    assert fake_st.session_state["selected_profile"] == profile_b
+    assert "edit_profile_form_name" not in fake_st.session_state
+    assert "edit_profile_form_goals_editor_profile-a" not in fake_st.session_state
+
+
+def test_successful_edit_save_returns_to_view_and_summary_reflects_saved_values(monkeypatch):
+    fake_st = FakeStreamlit()
+    fake_st.private_ui_allowed = True
+    fake_st.submit_value = True
+    seed_authenticated_session(fake_st, account_id="account-a")
+    stored_profile = {
+        "_id": "profile-a",
+        "name": "Before",
+        "age": 30,
+        "weight": 70,
+        "height": 170,
+        "gender": "Male",
+        "activity_level": "Sedentary",
+        "goals": ["Fat Loss"],
+    }
+    fake_st.session_state.update(
+        {
+            main.PROFILE_UI_MODE_SESSION_KEY: main.PROFILE_UI_MODE_EDIT,
+            main.UI_THEME_SESSION_KEY: "dark",
+            "selected_profile_id": "profile-a",
+            "selected_profile": stored_profile,
+            "edit_profile_form_goals_editor_profile-a": ["Improve mobility"],
+        }
+    )
+    fake_st.input_values = {
+        "Name": "After",
+        "Age": 31,
+        "Weight": 72,
+        "Height": 171,
+        "Gender": "Female",
+        "Activity Level": "Lightly Active",
+    }
+    monkeypatch.setattr(main, "st", fake_st)
+    calls = []
+
+    def fake_save_profile_changes(account_id, profile_id, **updates):
+        calls.append((account_id, profile_id, updates))
+        return {"_id": profile_id, **updates}
+
+    monkeypatch.setattr(main.profiles, "save_profile_changes", fake_save_profile_changes)
+    monkeypatch.setattr(
+        main.db,
+        "update_personal_information",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("main.py must use profiles service path")
+        ),
+    )
+    monkeypatch.setattr(main, "_refresh_profiles", lambda select_profile_id=None: True)
+
+    try:
+        main._render_profile_form(mode="edit", profile=stored_profile)
+    except RerunCalled:
+        pass
+    else:
+        raise AssertionError("profile save should rerun")
+
+    assert calls[0][0:2] == ("account-a", "profile-a")
+    assert calls[0][2]["name"] == "After"
+    assert calls[0][2]["goals"] == ["Improve mobility"]
+    assert fake_st.session_state[main.PROFILE_UI_MODE_SESSION_KEY] == main.PROFILE_UI_MODE_VIEW
+    assert fake_st.session_state[main.UI_THEME_SESSION_KEY] == "dark"
+
+    fake_st.submit_value = False
+    fake_st.write_calls = []
+    fake_st.subheader_calls = []
+    main._render_profile_summary(fake_st.session_state["selected_profile"])
+    visible_values = [args[0] for args, _kwargs in fake_st.write_calls]
+    assert fake_st.subheader_calls[0][0] == ("After",)
+    assert "31" in [str(value) for value in visible_values]
+    assert "72.0 kg" in visible_values
+    assert "171.0 cm" in visible_values
+    assert "Female" in visible_values
+    assert "Lightly Active" in visible_values
+    assert "- Improve mobility" in visible_values
+
+
+def test_successful_create_returns_to_view_and_new_profile_summary_displays(monkeypatch):
+    fake_st = FakeStreamlit()
+    fake_st.private_ui_allowed = True
+    fake_st.submit_value = True
+    seed_authenticated_session(fake_st, account_id="account-a")
+    new_profile = {
+        "_id": "profile-new",
+        "name": "New Profile",
+        "age": 29,
+        "weight": 68,
+        "height": 169,
+        "gender": "Other",
+        "activity_level": "Super Active",
+        "goals": ["Muscle Gain"],
+    }
+    fake_st.session_state.update(
+        {
+            main.PROFILE_UI_MODE_SESSION_KEY: main.PROFILE_UI_MODE_CREATE,
+            "profiles": [],
+            "selected_profile_id": None,
+            "selected_profile": None,
+            "create_profile_form_goals_editor": ["Muscle Gain"],
+        }
+    )
+    fake_st.input_values = {
+        "Name": "New Profile",
+        "Age": 29,
+        "Weight": 68,
+        "Height": 169,
+        "Gender": "Other",
+        "Activity Level": "Super Active",
+    }
+    monkeypatch.setattr(main, "st", fake_st)
+
+    monkeypatch.setattr(
+        main.profiles,
+        "create_new_profile",
+        lambda **kwargs: "profile-new",
+    )
+
+    def fake_refresh(select_profile_id=None):
+        assert select_profile_id == "profile-new"
+        fake_st.session_state["profiles"] = [new_profile]
+        fake_st.session_state["selected_profile_id"] = "profile-new"
+        fake_st.session_state["selected_profile"] = new_profile
+        return True
+
+    monkeypatch.setattr(main, "_refresh_profiles", fake_refresh)
+
+    try:
+        main._render_profile_form(mode="create")
+    except RerunCalled:
+        pass
+    else:
+        raise AssertionError("profile creation should rerun")
+
+    assert fake_st.session_state[main.PROFILE_UI_MODE_SESSION_KEY] == main.PROFILE_UI_MODE_VIEW
+
+    fake_st.submit_value = False
+    fake_st.write_calls = []
+    fake_st.subheader_calls = []
+    main.render_profile_section()
+    visible_values = [args[0] for args, _kwargs in fake_st.write_calls]
+    assert fake_st.subheader_calls[0][0] == ("New Profile",)
+    assert "- Muscle Gain" in visible_values
 
 
 def test_prompt_10_source_does_not_add_toolbar_or_javascript_hacks():

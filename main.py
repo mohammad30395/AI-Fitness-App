@@ -40,15 +40,17 @@ SESSION_DEFAULTS = {
     "notes_error": None,
     "confirm_delete_note_id": None,
     "ask_ai_error": None,
-    "profile_ui_mode": "selected",
+    "profile_ui_mode": "view",
 }
 
 UI_THEME_SESSION_KEY = "ui_theme"
 UI_THEME_OPTIONS = ("light", "dark")
 DEFAULT_UI_THEME = "light"
 PROFILE_UI_MODE_SESSION_KEY = "profile_ui_mode"
-PROFILE_UI_MODE_SELECTED = "selected"
+PROFILE_UI_MODE_VIEW = "view"
+PROFILE_UI_MODE_EDIT = "edit"
 PROFILE_UI_MODE_CREATE = "create"
+PROFILE_UI_MODE_SELECTED = PROFILE_UI_MODE_VIEW
 UI_THEME_TOKEN_NAMES = (
     "background",
     "surface",
@@ -514,14 +516,19 @@ def _render_authenticated_header() -> None:
 
 def _current_profile_ui_mode() -> str:
     mode = st.session_state.get(PROFILE_UI_MODE_SESSION_KEY)
-    if mode not in {PROFILE_UI_MODE_SELECTED, PROFILE_UI_MODE_CREATE}:
-        mode = PROFILE_UI_MODE_SELECTED
+    if mode not in {PROFILE_UI_MODE_VIEW, PROFILE_UI_MODE_EDIT, PROFILE_UI_MODE_CREATE}:
+        mode = PROFILE_UI_MODE_VIEW
         st.session_state[PROFILE_UI_MODE_SESSION_KEY] = mode
     return mode
 
 
 def _enter_create_profile_mode() -> None:
     st.session_state[PROFILE_UI_MODE_SESSION_KEY] = PROFILE_UI_MODE_CREATE
+
+
+def _enter_edit_profile_mode() -> None:
+    _clear_edit_profile_form_state()
+    st.session_state[PROFILE_UI_MODE_SESSION_KEY] = PROFILE_UI_MODE_EDIT
 
 
 def _clear_create_profile_form_state() -> None:
@@ -537,8 +544,13 @@ def _clear_create_profile_form_state() -> None:
     _clear_create_goal_editor_state()
 
 
+def _exit_edit_profile_mode() -> None:
+    st.session_state[PROFILE_UI_MODE_SESSION_KEY] = PROFILE_UI_MODE_VIEW
+    _clear_edit_profile_form_state()
+
+
 def _exit_create_profile_mode() -> None:
-    st.session_state[PROFILE_UI_MODE_SESSION_KEY] = PROFILE_UI_MODE_SELECTED
+    st.session_state[PROFILE_UI_MODE_SESSION_KEY] = PROFILE_UI_MODE_VIEW
     _clear_create_profile_form_state()
 
 
@@ -682,6 +694,17 @@ def _clear_edit_profile_choice_widget_state() -> None:
             st.session_state.pop(key, None)
 
 
+def _clear_edit_profile_form_state() -> None:
+    for key in (
+        "edit_profile_form_name",
+        "edit_profile_form_age",
+        "edit_profile_form_weight",
+        "edit_profile_form_height",
+    ):
+        st.session_state.pop(key, None)
+    _clear_edit_profile_choice_widget_state()
+
+
 def _clear_create_goal_editor_state() -> None:
     for key in (
         _goal_editor_key("create_profile_form", "goals_editor"),
@@ -819,7 +842,7 @@ def _copy_nutrition(nutrition):
 
 def _set_selected_profile(profile: dict | None) -> None:
     st.session_state["selected_profile"] = profile
-    _clear_edit_profile_choice_widget_state()
+    _clear_edit_profile_form_state()
     stored_nutrition = _copy_nutrition(profile.get("nutrition")) if profile else None
     st.session_state["nutrition"] = stored_nutrition
     _set_nutrition_draft(profile.get("_id") if profile else None, stored_nutrition)
@@ -905,11 +928,56 @@ def _profile_form_defaults(profile: dict | None = None) -> dict:
     }
 
 
+def _display_profile_value(value, fallback: str = "not set") -> str:
+    if value is None or value == "":
+        return fallback
+    return str(value)
+
+
+def _display_profile_measurement(value, unit: str) -> str:
+    if value is None or value == "":
+        return "not set"
+    return f"{value} {unit}"
+
+
+def _render_profile_summary(profile: dict) -> None:
+    name = _display_profile_value(profile.get("name"), "Unnamed profile")
+    goals = _goals_from_profile(profile)
+
+    with st.container(border=True):
+        st.subheader(name)
+        measurement_cols = st.columns(3)
+        with measurement_cols[0]:
+            st.caption("Age")
+            st.write(_display_profile_value(profile.get("age")))
+        with measurement_cols[1]:
+            st.caption("Weight")
+            st.write(_display_profile_measurement(profile.get("weight"), "kg"))
+        with measurement_cols[2]:
+            st.caption("Height")
+            st.write(_display_profile_measurement(profile.get("height"), "cm"))
+
+        profile_cols = st.columns(2)
+        with profile_cols[0]:
+            st.caption("Gender")
+            st.write(_display_profile_value(profile.get("gender")))
+        with profile_cols[1]:
+            st.caption("Activity Level")
+            st.write(_display_profile_value(profile.get("activity_level")))
+
+        st.caption("Goals")
+        if goals:
+            for goal in goals:
+                st.write(f"- {goal}")
+        else:
+            st.caption("No goals added.")
+
+
 def _render_profile_form(*, mode: str, profile: dict | None = None) -> None:
     defaults = _profile_form_defaults(profile)
     is_edit = mode == "edit"
     form_key = "edit_profile_form" if is_edit else "create_profile_form"
-    submit_label = "Save changes" if is_edit else "Create profile"
+    submit_label = "Save Changes" if is_edit else "Create profile"
     gender_options = (
         _single_choice_options_with_current(GENDER_OPTIONS, defaults["gender"])
         if is_edit
@@ -968,8 +1036,24 @@ def _render_profile_form(*, mode: str, profile: dict | None = None) -> None:
         )
         _render_goals_editor(form_key, goals_state_key, profile)
 
-        submitted = st.form_submit_button(submit_label, type="primary")
+        if is_edit:
+            save_col, cancel_col, _ = st.columns((1, 1, 4))
+            with save_col:
+                submitted = st.form_submit_button(submit_label, type="primary")
+            with cancel_col:
+                cancelled = st.form_submit_button(
+                    "Cancel",
+                    key=f"{form_key}_cancel",
+                    help="Discard unsaved profile changes",
+                    type="secondary",
+                )
+        else:
+            submitted = st.form_submit_button(submit_label, type="primary")
+            cancelled = False
 
+    if cancelled:
+        _exit_edit_profile_mode()
+        st.rerun()
     if not submitted:
         return
 
@@ -994,13 +1078,14 @@ def _render_profile_form(*, mode: str, profile: dict | None = None) -> None:
             st.session_state["selected_profile_id"] = updated_profile.get("_id", profile_id)
             st.session_state["selected_profile"] = updated_profile
             _refresh_profiles(st.session_state["selected_profile_id"])
+            st.session_state[PROFILE_UI_MODE_SESSION_KEY] = PROFILE_UI_MODE_VIEW
             st.session_state["profile_success"] = "Profile updated."
         else:
             new_profile_id = profiles.create_new_profile(
                 account_id=_trusted_account_id(),
                 **profile_payload,
             )
-            st.session_state[PROFILE_UI_MODE_SESSION_KEY] = PROFILE_UI_MODE_SELECTED
+            st.session_state[PROFILE_UI_MODE_SESSION_KEY] = PROFILE_UI_MODE_VIEW
             _clear_create_profile_form_state()
             _refresh_profiles(new_profile_id)
             st.session_state["profile_success"] = "Profile created."
@@ -1063,6 +1148,7 @@ def render_profile_section() -> None:
             if str(selected_id) != str(st.session_state.get("selected_profile_id")):
                 try:
                     account_id = _trusted_account_id()
+                    st.session_state[PROFILE_UI_MODE_SESSION_KEY] = PROFILE_UI_MODE_VIEW
                     st.session_state["selected_profile_id"] = selected_id
                     _set_selected_profile(profiles.get_profile_by_id(account_id, selected_id))
                     st.session_state["ui_error"] = None
@@ -1076,18 +1162,24 @@ def render_profile_section() -> None:
                 st.info("No profiles yet. Use Create Profile in the top action row.")
 
         selected_profile = st.session_state.get("selected_profile")
+        if profile_mode == PROFILE_UI_MODE_EDIT and not selected_profile:
+            st.session_state[PROFILE_UI_MODE_SESSION_KEY] = PROFILE_UI_MODE_VIEW
+            profile_mode = PROFILE_UI_MODE_VIEW
+
         if selected_profile:
-            profile_id = selected_profile.get("_id")
-            goals = selected_profile.get("goals") or []
-            summary_cols = st.columns(3)
-            summary_cols[0].caption(f"Profile ID: {profile_id}")
-            summary_cols[1].caption(
-                f"Activity: {selected_profile.get('activity_level') or 'not set'}"
-            )
-            summary_cols[2].caption(f"Goals: {len(goals) if isinstance(goals, list) else 0}")
-            _render_profile_form(mode="edit", profile=selected_profile)
+            if profile_mode == PROFILE_UI_MODE_EDIT:
+                st.subheader("Edit Profile")
+                _render_profile_form(mode="edit", profile=selected_profile)
+            else:
+                _render_profile_summary(selected_profile)
+                st.button(
+                    "Edit Profile",
+                    key="edit_profile_action",
+                    help="Edit the selected profile",
+                    on_click=_enter_edit_profile_mode,
+                )
         else:
-            st.info("Select a profile before editing, or use Create Profile in the top action row.")
+            st.info("No profile selected. Use Create Profile in the top action row.")
 
 
 def render_nutrition_section() -> None:
