@@ -16,6 +16,14 @@ DEFAULT_INPUT_TYPE = "chat"
 DEFAULT_OUTPUT_TYPE = "chat"
 DEFAULT_TIMEOUT_SECONDS = 60.0
 MAX_HTTP_ERROR_DIAGNOSTIC_CHARS = 320
+DEFAULT_MACRO_OPENROUTER_COMPONENT_ID = "ext:openrouter:OpenRouterComponent@official-snoVc"
+DEFAULT_ASK_ROUTER_OPENROUTER_COMPONENT_ID = "ext:openrouter:OpenRouterComponent@official-lyVR9"
+DEFAULT_ASK_ADVICE_OPENROUTER_COMPONENT_ID = "ext:openrouter:OpenRouterComponent@official-N7r20"
+DEFAULT_ASK_MATH_AGENT_COMPONENT_ID = "Agent-8TtHH"
+DEFAULT_MACRO_OPENROUTER_MAX_TOKENS = 512
+DEFAULT_ASK_ROUTER_OPENROUTER_MAX_TOKENS = 128
+DEFAULT_ASK_ADVICE_OPENROUTER_MAX_TOKENS = 1024
+DEFAULT_ASK_MATH_AGENT_MAX_TOKENS = 512
 
 _PROVIDER_QUOTA_TERMS = (
     "insufficient credit",
@@ -199,6 +207,45 @@ def _require_config_value(name: str) -> str:
     return value
 
 
+def _optional_config_value(name: str, default: str = "") -> str:
+    value = config.get_env_value(name).strip()
+    if value:
+        return value
+    return default.strip()
+
+
+def _optional_positive_int_config(name: str, default: int) -> int:
+    raw_value = _optional_config_value(name, str(default))
+    try:
+        value = int(raw_value)
+    except ValueError as exc:
+        raise LangflowConfigError(f"{name} must be a positive integer.") from exc
+    if value <= 0:
+        raise LangflowConfigError(f"{name} must be a positive integer.")
+    return value
+
+
+def _merge_tweaks(*tweak_groups: Mapping[str, Mapping[str, Any]]) -> dict[str, dict[str, Any]]:
+    merged: dict[str, dict[str, Any]] = {}
+    for tweak_group in tweak_groups:
+        for component_id, fields in tweak_group.items():
+            existing = merged.setdefault(component_id, {})
+            existing.update(dict(fields))
+    return merged
+
+
+def _openrouter_component_tweak(component_id: str, max_tokens: int) -> dict[str, dict[str, Any]]:
+    if not component_id.strip():
+        return {}
+
+    fields: dict[str, Any] = {"max_tokens": max_tokens}
+    openrouter_api_key = config.get_env_value("OPENROUTER_API_KEY").strip()
+    if openrouter_api_key:
+        fields["api_key"] = openrouter_api_key
+
+    return {component_id.strip(): fields}
+
+
 def _build_run_url(base_url: str, flow_id: str) -> str:
     cleaned_base_url = base_url.rstrip("/")
     parsed_url = urlparse(cleaned_base_url)
@@ -369,17 +416,28 @@ def get_macros(profile_context: str, goals: str) -> dict[str, int | float]:
 
     flow_id = _require_config_value("MACRO_FLOW_ID")
     goals_component_id = _require_config_value("MACRO_GOALS_COMPONENT_ID")
+    openrouter_component_id = _optional_config_value(
+        "MACRO_OPENROUTER_COMPONENT_ID",
+        DEFAULT_MACRO_OPENROUTER_COMPONENT_ID,
+    )
+    openrouter_max_tokens = _optional_positive_int_config(
+        "MACRO_OPENROUTER_MAX_TOKENS",
+        DEFAULT_MACRO_OPENROUTER_MAX_TOKENS,
+    )
 
     text = run_flow(
         flow_id,
         profile_context,
         input_type=DEFAULT_INPUT_TYPE,
         output_type=DEFAULT_OUTPUT_TYPE,
-        tweaks={
-            goals_component_id: {
-                "goals": goals,
-            }
-        },
+        tweaks=_merge_tweaks(
+            {
+                goals_component_id: {
+                    "goals": goals,
+                }
+            },
+            _openrouter_component_tweak(openrouter_component_id, openrouter_max_tokens),
+        ),
     )
     return parse_nutrition_json(text)
 
@@ -401,6 +459,30 @@ def ask_ai(
     flow_id = _require_config_value("ASK_AI_FLOW_ID")
     profile_component_id = _require_config_value("ASK_PROFILE_COMPONENT_ID")
     user_id_component_id = _require_config_value("ASK_USER_ID_COMPONENT_ID")
+    router_openrouter_component_id = _optional_config_value(
+        "ASK_ROUTER_OPENROUTER_COMPONENT_ID",
+        DEFAULT_ASK_ROUTER_OPENROUTER_COMPONENT_ID,
+    )
+    advice_openrouter_component_id = _optional_config_value(
+        "ASK_ADVICE_OPENROUTER_COMPONENT_ID",
+        DEFAULT_ASK_ADVICE_OPENROUTER_COMPONENT_ID,
+    )
+    math_agent_component_id = _optional_config_value(
+        "ASK_MATH_AGENT_COMPONENT_ID",
+        DEFAULT_ASK_MATH_AGENT_COMPONENT_ID,
+    )
+    router_max_tokens = _optional_positive_int_config(
+        "ASK_ROUTER_OPENROUTER_MAX_TOKENS",
+        DEFAULT_ASK_ROUTER_OPENROUTER_MAX_TOKENS,
+    )
+    advice_max_tokens = _optional_positive_int_config(
+        "ASK_ADVICE_OPENROUTER_MAX_TOKENS",
+        DEFAULT_ASK_ADVICE_OPENROUTER_MAX_TOKENS,
+    )
+    math_agent_max_tokens = _optional_positive_int_config(
+        "ASK_MATH_AGENT_MAX_TOKENS",
+        DEFAULT_ASK_MATH_AGENT_MAX_TOKENS,
+    )
 
     return run_flow(
         flow_id,
@@ -408,12 +490,17 @@ def ask_ai(
         input_type=DEFAULT_INPUT_TYPE,
         output_type=DEFAULT_OUTPUT_TYPE,
         session_id=session_id,
-        tweaks={
-            profile_component_id: {
-                "profile": profile_context,
+        tweaks=_merge_tweaks(
+            {
+                profile_component_id: {
+                    "profile": profile_context,
+                },
+                user_id_component_id: {
+                    "advanced_search_filter": json.dumps(search_filter),
+                },
             },
-            user_id_component_id: {
-                "advanced_search_filter": json.dumps(search_filter),
-            },
-        },
+            _openrouter_component_tweak(router_openrouter_component_id, router_max_tokens),
+            _openrouter_component_tweak(advice_openrouter_component_id, advice_max_tokens),
+            _openrouter_component_tweak(math_agent_component_id, math_agent_max_tokens),
+        ),
     )

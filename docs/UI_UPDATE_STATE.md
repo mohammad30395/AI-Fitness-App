@@ -1357,3 +1357,37 @@ GENERAL
 
 ### Manual browser verification
 - manual authenticated tooltip verification: NOT RUN — user browser recheck required
+
+## Runtime Fix — OpenRouter 402 After API Key Rotation
+
+### Manual defect observed
+- The user rotated the OpenRouter API key, but Generate with AI continued to show the same OpenRouter credit/token-budget failure.
+- The visible Streamlit error was still classified as a provider quota/token-budget failure from Langflow.
+
+### Diagnosis
+- Direct OpenRouter auth check with the `.env` key returned HTTP 200, so the key was valid.
+- A direct tiny `openai/gpt-4o-mini` completion with the `.env` key succeeded.
+- The live Langflow macro flow still failed until the OpenRouter component was given an explicit small `max_tokens` tweak.
+- The live Langflow diagnostic reported a 16,384-token request against an account budget that could afford fewer tokens.
+- The exported and live Langflow OpenRouter components had `max_tokens=0`, which behaved like no explicit output cap.
+
+### Flow components identified
+- Macro OpenRouter component: `ext:openrouter:OpenRouterComponent@official-snoVc`.
+- Ask AI router OpenRouter component: `ext:openrouter:OpenRouterComponent@official-lyVR9`.
+- Ask AI advice OpenRouter component: `ext:openrouter:OpenRouterComponent@official-N7r20`.
+- Ask AI math-agent OpenRouter-backed component: `Agent-8TtHH`.
+
+### Fix strategy
+- Kept the application architecture as Streamlit -> `ai.py` -> Langflow -> OpenRouter.
+- Added native Langflow request tweaks that cap OpenRouter output tokens:
+  - macro: `512`
+  - Ask AI router: `128`
+  - Ask AI advice: `1024`
+  - Ask AI math agent: `512`
+- When `OPENROUTER_API_KEY` is present in `.env`, the app passes it to the OpenRouter-backed Langflow components through native tweaks so key rotation in `.env` is actually used by the running flow.
+- No OpenRouter key was added to source code.
+
+### Verification
+- Live app macro path after fix: PASS.
+- Live app Ask AI math route after fix: PASS.
+- Focused `tests/test_ai.py tests/test_config.py`: PASS.

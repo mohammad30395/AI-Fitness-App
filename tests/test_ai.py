@@ -402,7 +402,14 @@ def test_run_flow_rejects_missing_config_without_secret(monkeypatch):
 
 
 def test_get_macros_uses_configured_macro_flow_and_goals_component(monkeypatch):
-    patch_macro_config(monkeypatch)
+    values = {
+        "MACRO_FLOW_ID": "macro-flow",
+        "MACRO_GOALS_COMPONENT_ID": "Prompt Template-VgARU",
+        "MACRO_OPENROUTER_COMPONENT_ID": "ext:openrouter:OpenRouterComponent@official-snoVc",
+        "MACRO_OPENROUTER_MAX_TOKENS": "512",
+        "OPENROUTER_API_KEY": "fake-openrouter-key",
+    }
+    monkeypatch.setattr(ai.config, "get_env_value", lambda name: values.get(name, ""))
     calls = []
 
     def fake_run_flow(flow_id, input_value, **kwargs):
@@ -429,11 +436,31 @@ def test_get_macros_uses_configured_macro_flow_and_goals_component(monkeypatch):
                 "tweaks": {
                     "Prompt Template-VgARU": {
                         "goals": "build strength",
+                    },
+                    "ext:openrouter:OpenRouterComponent@official-snoVc": {
+                        "max_tokens": 512,
+                        "api_key": "fake-openrouter-key",
                     }
                 },
             },
         )
     ]
+
+
+def test_get_macros_caps_openrouter_tokens_without_openrouter_key(monkeypatch):
+    patch_macro_config(monkeypatch)
+    calls = []
+
+    def fake_run_flow(flow_id, input_value, **kwargs):
+        calls.append(kwargs)
+        return '{"calories": 2200, "protein": 150, "fat": 70, "carbs": 250}'
+
+    monkeypatch.setattr(ai, "run_flow", fake_run_flow)
+
+    ai.get_macros("profile context", "build strength")
+
+    openrouter_tweak = calls[0]["tweaks"]["ext:openrouter:OpenRouterComponent@official-snoVc"]
+    assert openrouter_tweak == {"max_tokens": 512}
 
 
 @pytest.mark.parametrize(
@@ -459,7 +486,19 @@ def test_get_macros_rejects_blank_profile_context(monkeypatch, profile_context):
 
 
 def test_ask_ai_uses_configured_flow_and_runtime_tweaks(monkeypatch):
-    patch_ask_ai_config(monkeypatch)
+    values = {
+        "ASK_AI_FLOW_ID": "ask-flow",
+        "ASK_PROFILE_COMPONENT_ID": "Prompt Template-GtOCM",
+        "ASK_USER_ID_COMPONENT_ID": "ext:datastax:AstraDBVectorStoreComponent@official-2VBhC",
+        "ASK_ROUTER_OPENROUTER_COMPONENT_ID": "ext:openrouter:OpenRouterComponent@official-lyVR9",
+        "ASK_ADVICE_OPENROUTER_COMPONENT_ID": "ext:openrouter:OpenRouterComponent@official-N7r20",
+        "ASK_MATH_AGENT_COMPONENT_ID": "Agent-8TtHH",
+        "ASK_ROUTER_OPENROUTER_MAX_TOKENS": "128",
+        "ASK_ADVICE_OPENROUTER_MAX_TOKENS": "1024",
+        "ASK_MATH_AGENT_MAX_TOKENS": "512",
+        "OPENROUTER_API_KEY": "fake-openrouter-key",
+    }
+    monkeypatch.setattr(ai.config, "get_env_value", lambda name: values.get(name, ""))
     calls = []
 
     def fake_run_flow(flow_id, input_value, **kwargs):
@@ -493,6 +532,18 @@ def test_ask_ai_uses_configured_flow_and_runtime_tweaks(monkeypatch):
                         "advanced_search_filter": (
                             '{"owner_account_id": "account-1", "user_id": "profile-1"}'
                         ),
+                    },
+                    "ext:openrouter:OpenRouterComponent@official-lyVR9": {
+                        "max_tokens": 128,
+                        "api_key": "fake-openrouter-key",
+                    },
+                    "ext:openrouter:OpenRouterComponent@official-N7r20": {
+                        "max_tokens": 1024,
+                        "api_key": "fake-openrouter-key",
+                    },
+                    "Agent-8TtHH": {
+                        "max_tokens": 512,
+                        "api_key": "fake-openrouter-key",
                     },
                 },
             },
