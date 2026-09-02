@@ -1304,3 +1304,56 @@ GENERAL
 
 ### Ready for final manual sign-off
 - yes, pending user visual recheck in an authenticated browser session.
+
+## FIX Prompt-15 — Native Tooltip Inner-Text Contrast
+
+### Manual defect observed
+- In light mode, native Streamlit button tooltips rendered with a dark tooltip background but dark or near-dark inner text.
+- The reported example was the top-right Create Profile button help text, `Create a new profile`.
+- Dark mode tooltip readability was already acceptable.
+
+### Streamlit tooltip source evidence
+- Installed Streamlit version verified: `1.61.1`.
+- Streamlit's bundled tooltip source assigns the tooltip container `role="tooltip"`.
+- `WidgetLabelHelpIcon` passes native `help` content into the tooltip as a `StreamlitMarkdown` element with `allowHTML: false`.
+- `StreamlitMarkdown` renders that content inside `data-testid="stMarkdownContainer"`.
+- Plain help text is rendered by the markdown pipeline as paragraph text under that container.
+
+### Cascade root cause
+- The tooltip container rule already set `background-color: var(--fit-tooltip-background)`, `border: 1px solid var(--fit-tooltip-border)`, and `color: var(--fit-tooltip-text)`.
+- The app also has normal page markdown foreground rules for `[data-testid="stMarkdownContainer"] p` and `[data-testid="stMarkdownContainer"] span`.
+- Those page markdown rules have higher specificity than the previous tooltip descendant fallback, `[role="tooltip"] *`.
+- In light mode, the page markdown rule could therefore apply `var(--fit-text)` to the actual tooltip paragraph/span, producing dark text on the dark tooltip background.
+
+### Fix strategy
+- Kept Streamlit native tooltips and native escaping.
+- Removed the broad tooltip universal selector.
+- Added explicit tooltip-scoped markdown text selectors:
+  - `[role="tooltip"] [data-testid="stMarkdownContainer"]`
+  - `[role="tooltip"] [data-testid="stMarkdownContainer"] p`
+  - `[role="tooltip"] [data-testid="stMarkdownContainer"] span`
+- The scoped paragraph/span selectors outrank the normal page markdown selectors and bind visible tooltip text to `var(--fit-tooltip-text)`.
+
+### Preserved behavior
+- Header order remains Theme -> Create Profile -> Logout.
+- Prompt-14 `[data-testid="stMainBlockContainer"]` top safe-zone remains unchanged.
+- Create Profile retains `help="Create a new profile"`.
+- Goal `+` retains `help="Add goal"`.
+- Goal remove retains `help=f"Remove {goal}"`.
+- Goal add confirmation retains `help="Confirm new goal"`.
+- No profile flow, Goal state, persistence, Nutrition, Notes, Ask AI, Langflow, OpenRouter, Astra, or backend module behavior was changed.
+
+### Security and selector safety
+- No custom tooltip HTML, JavaScript, `components.html`, or unsafe goal-string markup was added.
+- No generated Streamlit class hash selector was added.
+- Tooltip selectors remain rooted under verified `[role="tooltip"]` and the verified markdown container `data-testid`.
+
+### Tests
+- Added/updated tests for the verified tooltip root and explicit inner markdown text selector contract.
+- Added/updated tests preventing broad global `label`, `p`, or `span` foreground rules and generated/hash selectors.
+- Added/updated tests preserving Create Profile, theme, and Logout native help text.
+- Existing Goal tooltip help text tests remain active.
+- Existing light/dark tooltip token contrast tests remain active.
+
+### Manual browser verification
+- manual authenticated tooltip verification: NOT RUN — user browser recheck required

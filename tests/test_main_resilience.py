@@ -1292,6 +1292,7 @@ def test_ui_theme_css_uses_tokens_without_js_or_private_api(monkeypatch):
     assert "[data-testid=\"stMainBlockContainer\"]" in css
     assert "padding-top: 4.5rem;" in css
     assert "[role=\"tooltip\"]" in css
+    assert "[role=\"tooltip\"] [data-testid=\"stMarkdownContainer\"] p" in css
     assert 'button[kind="primaryFormSubmit"]' in css
     assert "<script" not in css.lower()
     assert "st._config" not in css
@@ -1362,9 +1363,34 @@ def test_ui_theme_css_keeps_tooltip_text_from_global_span_leak(monkeypatch):
         line.strip() in {"label,", "p,", "span {", "div {"}
         for line in css.splitlines()
     )
-    assert "[role=\"tooltip\"] *" in css
+    assert "[role=\"tooltip\"] *" not in css
     assert "color: var(--fit-tooltip-text);" in css
     assert "background-color: var(--fit-tooltip-background);" in css
+    assert "border: 1px solid var(--fit-tooltip-border);" in css
+    assert "[role=\"tooltip\"] [data-testid=\"stMarkdownContainer\"]" in css
+    assert "[role=\"tooltip\"] [data-testid=\"stMarkdownContainer\"] p" in css
+    assert "[role=\"tooltip\"] [data-testid=\"stMarkdownContainer\"] span" in css
+    assert css.index("[role=\"tooltip\"] [data-testid=\"stMarkdownContainer\"] p") > css.index(
+        "[data-testid=\"stMarkdownContainer\"] p"
+    )
+
+
+def test_header_button_help_strings_remain_native_help_text(monkeypatch):
+    fake_st = FakeStreamlit()
+    fake_st.session_state[main.UI_THEME_SESSION_KEY] = "light"
+    fake_st.session_state["username"] = "test-user"
+    fake_st.private_ui_allowed = True
+    monkeypatch.setattr(main, "st", fake_st)
+
+    main._render_authenticated_header()
+
+    help_texts = {
+        label: kwargs.get("help")
+        for label, kwargs in fake_st.button_calls
+    }
+    assert help_texts["🌙 Dark"] == "Switch to dark mode"
+    assert help_texts["Create Profile"] == "Create a new profile"
+    assert help_texts["Logout"] == "Sign out"
 
 
 def test_goal_tooltip_source_uses_native_help_without_custom_markup():

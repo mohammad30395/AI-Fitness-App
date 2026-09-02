@@ -266,7 +266,9 @@ def _apply_ui_theme() -> None:
     color: var(--fit-tooltip-text);
 }}
 
-[role="tooltip"] * {{
+[role="tooltip"] [data-testid="stMarkdownContainer"],
+[role="tooltip"] [data-testid="stMarkdownContainer"] p,
+[role="tooltip"] [data-testid="stMarkdownContainer"] span {{
     color: var(--fit-tooltip-text);
 }}
 
