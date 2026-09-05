@@ -53,6 +53,10 @@ class AuthenticationError(RuntimeError):
     """Raised when username/password authentication fails."""
 
 
+class PasswordUpdateError(RuntimeError):
+    """Raised when an authenticated password update is rejected."""
+
+
 def normalize_username(username: str) -> str:
     """Return the deterministic normalized username."""
     if not isinstance(username, str):
@@ -191,3 +195,48 @@ def authenticate(username: str, password: str) -> dict[str, str]:
         "account_id": account_id,
         "username": display_username,
     }
+
+
+def update_password(username: str, current_password: str, new_password: str) -> None:
+    """Update an existing account password after verifying the current password."""
+    failure_message = "Current password is incorrect."
+    normalized_username = validate_username(username)
+    validated_new_password = validate_password(new_password)
+
+    try:
+        accounts_collection = db.get_accounts_collection()
+        account = accounts_collection.find_one({"_id": normalized_username})
+    except Exception as error:
+        raise AccountStorageError(f"Updating password failed ({type(error).__name__}).") from error
+
+    if account is None:
+        raise AuthenticationError("Invalid username or password.")
+
+    if not isinstance(account, dict):
+        raise AccountStorageError("Stored account record is malformed.")
+
+    password_hash = account.get("password_hash")
+    if not isinstance(password_hash, str) or not password_hash:
+        raise AccountStorageError("Stored account record is malformed.")
+
+    if not verify_password(current_password, password_hash):
+        raise PasswordUpdateError(failure_message)
+
+    if verify_password(validated_new_password, password_hash):
+        raise InvalidPasswordError("New password must be different from the current password.")
+
+    try:
+        result = accounts_collection.update_one(
+            {"_id": normalized_username},
+            {
+                "$set": {
+                    "password_hash": hash_password(validated_new_password),
+                    "updated_at": datetime.now(timezone.utc),
+                }
+            },
+        )
+    except Exception as error:
+        raise AccountStorageError(f"Updating password failed ({type(error).__name__}).") from error
+
+    if getattr(result, "matched_count", 1) == 0:
+        raise AccountStorageError("Stored account record is malformed.")

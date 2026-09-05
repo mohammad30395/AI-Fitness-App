@@ -64,6 +64,7 @@ class FakeStreamlit:
         self.session_state = FakeSessionState()
         self.info_messages = []
         self.error_messages = []
+        self.success_messages = []
         self.caption_messages = []
         self.markdown_calls = []
         self.write_calls = []
@@ -113,6 +114,10 @@ class FakeStreamlit:
         return [FakeColumn(self) for _ in range(count)]
 
     def container(self, **kwargs):
+        return FakeTab()
+
+    def expander(self, label, **kwargs):
+        self.events.append(("expander", label))
         return FakeTab()
 
     def form(self, key):
@@ -196,6 +201,7 @@ class FakeStreamlit:
             raise AssertionError("private UI must not render before authentication")
 
     def success(self, *args, **kwargs):
+        self.success_messages.append(args[0] if args else "")
         return None
 
     def warning(self, *args, **kwargs):
@@ -1795,6 +1801,137 @@ def test_auth_session_id_rotates_between_logins(monkeypatch):
     assert first_session_id
     assert second_session_id
     assert first_session_id != second_session_id
+
+
+def test_update_password_form_calls_auth_and_rotates_session(monkeypatch):
+    fake_st = FakeStreamlit()
+    fake_st.private_ui_allowed = True
+    fake_st.submit_value = True
+    fake_st.session_state.update(
+        {
+            "authenticated": True,
+            "account_id": "account-a",
+            "username": "UserA",
+            "auth_session_id": "session-a",
+        }
+    )
+    fake_st.input_values = {
+        "Current Password": "current-password-1",
+        "New Password": "new-password-123",
+        "Confirm New Password": "new-password-123",
+    }
+    monkeypatch.setattr(main, "st", fake_st)
+    calls = []
+
+    def fake_update_password(username, current_password, new_password):
+        calls.append((username, current_password, new_password))
+
+    monkeypatch.setattr(main.auth, "update_password", fake_update_password)
+
+    try:
+        main._render_account_settings()
+    except RerunCalled:
+        pass
+    else:
+        raise AssertionError("successful password update should trigger rerun")
+
+    assert calls == [("UserA", "current-password-1", "new-password-123")]
+    assert fake_st.session_state["auth_session_id"] != "session-a"
+    assert fake_st.session_state["account_password_success"] == "Password updated."
+    assert "account_current_password" not in fake_st.session_state
+    assert "account_new_password" not in fake_st.session_state
+    assert "account_confirm_new_password" not in fake_st.session_state
+
+
+def test_update_password_form_rejects_mismatched_confirmation(monkeypatch):
+    fake_st = FakeStreamlit()
+    fake_st.private_ui_allowed = True
+    fake_st.submit_value = True
+    fake_st.session_state.update(
+        {
+            "authenticated": True,
+            "account_id": "account-a",
+            "username": "UserA",
+            "auth_session_id": "session-a",
+        }
+    )
+    fake_st.input_values = {
+        "Current Password": "current-password-1",
+        "New Password": "new-password-123",
+        "Confirm New Password": "different-password-123",
+    }
+    monkeypatch.setattr(main, "st", fake_st)
+    calls = []
+    monkeypatch.setattr(
+        main.auth,
+        "update_password",
+        lambda username, current_password, new_password: calls.append(
+            (username, current_password, new_password)
+        ),
+    )
+
+    main._render_account_settings()
+
+    assert calls == []
+    assert fake_st.error_messages == ["New passwords do not match."]
+    assert fake_st.session_state["auth_session_id"] == "session-a"
+
+
+def test_update_password_form_handles_wrong_current_password_generically(monkeypatch):
+    fake_st = FakeStreamlit()
+    fake_st.private_ui_allowed = True
+    fake_st.submit_value = True
+    fake_st.session_state.update(
+        {
+            "authenticated": True,
+            "account_id": "account-a",
+            "username": "UserA",
+            "auth_session_id": "session-a",
+        }
+    )
+    fake_st.input_values = {
+        "Current Password": "wrong-password-1",
+        "New Password": "new-password-123",
+        "Confirm New Password": "new-password-123",
+    }
+    monkeypatch.setattr(main, "st", fake_st)
+
+    def fake_update_password(username, current_password, new_password):
+        raise main.auth.PasswordUpdateError("Current password is incorrect.")
+
+    monkeypatch.setattr(main.auth, "update_password", fake_update_password)
+
+    main._render_account_settings()
+
+    assert fake_st.error_messages == ["Current password is incorrect."]
+    assert fake_st.session_state["authenticated"] is True
+    assert fake_st.session_state["account_id"] == "account-a"
+    assert fake_st.session_state["auth_session_id"] == "session-a"
+
+
+def test_authenticated_header_renders_account_password_option_without_reordering_actions(
+    monkeypatch,
+):
+    fake_st = FakeStreamlit()
+    fake_st.private_ui_allowed = True
+    fake_st.session_state.update(
+        {
+            "authenticated": True,
+            "account_id": "account-a",
+            "username": "UserA",
+            "auth_session_id": "session-a",
+            main.UI_THEME_SESSION_KEY: "light",
+        }
+    )
+    monkeypatch.setattr(main, "st", fake_st)
+
+    main._render_authenticated_header()
+
+    assert ("expander", "Account") in fake_st.events
+    button_labels = [label for label, _kwargs in fake_st.button_calls]
+    assert button_labels == ["🌙 Dark", "Create Profile", "Logout"]
+    submit_labels = [label for label, _kwargs in fake_st.form_submit_calls]
+    assert "Update Password" in submit_labels
 
 
 def test_refresh_profiles_uses_authenticated_account_for_list_and_read(monkeypatch):

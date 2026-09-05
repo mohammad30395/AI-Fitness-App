@@ -438,6 +438,15 @@ def _establish_authenticated_session(account: dict[str, str]) -> None:
     st.session_state["auth_session_id"] = str(uuid.uuid4())
 
 
+def _clear_update_password_form_state() -> None:
+    for key in (
+        "account_current_password",
+        "account_new_password",
+        "account_confirm_new_password",
+    ):
+        st.session_state.pop(key, None)
+
+
 def _render_login_form() -> None:
     st.header("Login")
     with st.form("login_form"):
@@ -506,6 +515,57 @@ def _enforce_authentication_gate() -> None:
     st.stop()
 
 
+def _render_account_settings() -> None:
+    with st.expander("Account", expanded=False):
+        message = st.session_state.pop("account_password_success", None)
+        if message:
+            st.success(message)
+
+        with st.form("update_password_form"):
+            current_password = st.text_input(
+                "Current Password",
+                type="password",
+                key="account_current_password",
+            )
+            new_password = st.text_input(
+                "New Password",
+                type="password",
+                key="account_new_password",
+            )
+            confirm_new_password = st.text_input(
+                "Confirm New Password",
+                type="password",
+                key="account_confirm_new_password",
+            )
+            submitted = st.form_submit_button("Update Password", type="primary")
+
+        if not submitted:
+            return
+
+        if new_password != confirm_new_password:
+            st.error("New passwords do not match.")
+            return
+
+        try:
+            auth.update_password(
+                st.session_state["username"],
+                current_password,
+                new_password,
+            )
+        except auth.PasswordUpdateError as error:
+            st.error(str(error))
+        except auth.AuthValidationError as error:
+            st.error(str(error))
+        except Exception as error:
+            _record_ui_failure("Updating password", error)
+            st.error("Unable to update password right now.")
+        else:
+            st.session_state["auth_session_id"] = str(uuid.uuid4())
+            _clear_update_password_form_state()
+            st.session_state["account_password_success"] = "Password updated."
+            st.rerun()
+
+
 def _render_authenticated_header() -> None:
     account_col, _, theme_col, create_col, logout_col = st.columns(
         (4, 2, 1, 1.6, 1),
@@ -513,6 +573,7 @@ def _render_authenticated_header() -> None:
     )
     with account_col:
         st.caption(f"Signed in as {st.session_state['username']}")
+        _render_account_settings()
     with theme_col:
         _render_theme_button()
     with create_col:

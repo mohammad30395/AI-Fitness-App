@@ -35,6 +35,7 @@ class FakeAccountsCollection:
     def __init__(self):
         self.documents = []
         self.find_filters = []
+        self.update_calls = []
 
     def insert_one(self, document):
         if any(existing["_id"] == document["_id"] for existing in self.documents):
@@ -52,6 +53,24 @@ class FakeAccountsCollection:
             if document["_id"] == filter_doc["_id"]:
                 return dict(document)
         return None
+
+    def update_one(self, filter_doc, update_doc):
+        self.update_calls.append((dict(filter_doc), dict(update_doc)))
+        if set(filter_doc) != {"_id"}:
+            raise AssertionError("password update must query by normalized _id only")
+        for document in self.documents:
+            if document["_id"] == filter_doc["_id"]:
+                document.update(update_doc.get("$set", {}))
+
+                class UpdateResult:
+                    matched_count = 1
+
+                return UpdateResult()
+
+        class UpdateResult:
+            matched_count = 0
+
+        return UpdateResult()
 
 
 def patch_accounts_collection(monkeypatch, collection):
@@ -315,3 +334,61 @@ def test_authenticate_sanitizes_database_exception(monkeypatch):
     assert secret not in message
     assert VALID_PASSWORD not in message
     assert "argon2" not in message
+
+
+def test_update_password_verifies_current_password_and_rehashes(monkeypatch):
+    collection = FakeAccountsCollection()
+    patch_accounts_collection(monkeypatch, collection)
+    auth.create_account("login-user", VALID_PASSWORD)
+    old_hash = collection.documents[0]["password_hash"]
+
+    auth.update_password("login-user", VALID_PASSWORD, "new secure password")
+
+    document = collection.documents[0]
+    assert document["password_hash"] != old_hash
+    assert auth.verify_password(VALID_PASSWORD, document["password_hash"]) is False
+    assert auth.verify_password("new secure password", document["password_hash"]) is True
+    assert document["updated_at"].tzinfo is not None
+    assert document["updated_at"].utcoffset() == timezone.utc.utcoffset(document["updated_at"])
+    assert collection.find_filters[-1] == {"_id": "login-user"}
+    assert collection.update_calls[-1][0] == {"_id": "login-user"}
+    assert "$set" in collection.update_calls[-1][1]
+    assert collection.update_calls[-1][1]["$set"]["password_hash"] != "new secure password"
+    assert VALID_PASSWORD not in collection.update_calls[-1][1]["$set"].values()
+
+
+def test_update_password_rejects_wrong_current_password_without_update(monkeypatch):
+    collection = FakeAccountsCollection()
+    patch_accounts_collection(monkeypatch, collection)
+    auth.create_account("login-user", VALID_PASSWORD)
+    old_hash = collection.documents[0]["password_hash"]
+
+    with pytest.raises(auth.PasswordUpdateError) as exc_info:
+        auth.update_password("login-user", "wrong current password", "new secure password")
+
+    assert str(exc_info.value) == "Current password is incorrect."
+    assert collection.documents[0]["password_hash"] == old_hash
+    assert collection.update_calls == []
+
+
+def test_update_password_rejects_reusing_current_password(monkeypatch):
+    collection = FakeAccountsCollection()
+    patch_accounts_collection(monkeypatch, collection)
+    auth.create_account("login-user", VALID_PASSWORD)
+
+    with pytest.raises(auth.InvalidPasswordError) as exc_info:
+        auth.update_password("login-user", VALID_PASSWORD, VALID_PASSWORD)
+
+    assert str(exc_info.value) == "New password must be different from the current password."
+    assert collection.update_calls == []
+
+
+def test_update_password_rejects_invalid_new_password_before_update(monkeypatch):
+    collection = FakeAccountsCollection()
+    patch_accounts_collection(monkeypatch, collection)
+    auth.create_account("login-user", VALID_PASSWORD)
+
+    with pytest.raises(auth.InvalidPasswordError):
+        auth.update_password("login-user", VALID_PASSWORD, "too-short")
+
+    assert collection.update_calls == []
