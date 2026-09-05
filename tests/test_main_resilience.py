@@ -1909,6 +1909,40 @@ def test_update_password_form_handles_wrong_current_password_generically(monkeyp
     assert fake_st.session_state["auth_session_id"] == "session-a"
 
 
+def test_update_password_form_does_not_crash_if_password_error_type_is_stale(
+    monkeypatch,
+):
+    fake_st = FakeStreamlit()
+    fake_st.private_ui_allowed = True
+    fake_st.submit_value = True
+    fake_st.session_state.update(
+        {
+            "authenticated": True,
+            "account_id": "account-a",
+            "username": "UserA",
+            "auth_session_id": "session-a",
+        }
+    )
+    fake_st.input_values = {
+        "Current Password": "wrong-password-1",
+        "New Password": "new-password-123",
+        "Confirm New Password": "new-password-123",
+    }
+    monkeypatch.setattr(main, "st", fake_st)
+    monkeypatch.delattr(main.auth, "PasswordUpdateError", raising=False)
+
+    def fake_update_password(username, current_password, new_password):
+        raise main.auth.AuthenticationError("Invalid username or password.")
+
+    monkeypatch.setattr(main.auth, "update_password", fake_update_password)
+
+    main._render_account_settings()
+
+    assert fake_st.error_messages == ["Invalid username or password."]
+    assert fake_st.session_state["authenticated"] is True
+    assert fake_st.session_state["auth_session_id"] == "session-a"
+
+
 def test_authenticated_header_renders_account_password_option_without_reordering_actions(
     monkeypatch,
 ):

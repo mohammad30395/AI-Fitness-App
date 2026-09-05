@@ -552,7 +552,7 @@ def _render_account_settings() -> None:
                 current_password,
                 new_password,
             )
-        except auth.PasswordUpdateError as error:
+        except getattr(auth, "PasswordUpdateError", auth.AuthenticationError) as error:
             st.error(str(error))
         except auth.AuthValidationError as error:
             st.error(str(error))
