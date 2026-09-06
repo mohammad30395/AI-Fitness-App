@@ -307,4 +307,8 @@ Fix the Langflow prompt/model behavior rather than weakening the parser.
 
 ## License
 
-No license file is currently included. Add one before distributing or publishing this project.
+This project is licensed under the MIT License.
+
+Copyright (c) 2026 Mohammad Mahmudul Kabir Fahmid.
+
+See [LICENSE](LICENSE) for the full license text.
